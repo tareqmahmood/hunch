@@ -1,0 +1,14 @@
+# build output
+target/
+.venv/
+*.so
+__pycache__/
+*.pyc
+.pytest_cache/
+# local files
+.DS_Store
+# downloaded datasets and example output
+examples/data/hf/
+examples/results/
+
+.env

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "eg2cpu"
+version = "0.1.0"
+description = "CPU (SIMD, SME, AMX) inference for the EmbeddingGemma 2 encoder, text and images, with compiled decision handles"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+requires-python = ">=3.10"
+dependencies = ["numpy", "pyyaml"]
+
+[project.scripts]
+eg2cpu-decisions = "eg2cpu.decisions:main"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.maturin]
+features = ["python"]
+python-source = "python"
+module-name = "eg2cpu._eg2cpu"
+
+[tool.uv]
+# Rebuild the cached wheel when the Rust or Python sources change, not only pyproject.toml.
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "src/**/*.rs" }, { file = "python/**/*.py" }]
