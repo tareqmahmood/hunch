@@ -1,0 +1,25 @@
+[project]
+name = "hunch"
+version = "0.1.0"
+description = "A proxy that answers typed questions locally once it has learned to agree with a teacher model"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+requires-python = ">=3.10"
+dependencies = ["eg2cpu", "numpy", "scikit-learn"]
+
+[project.optional-dependencies]
+redis = ["redis>=5"]
+
+[project.scripts]
+hunch = "hunch.proxy:main"
+
+[tool.uv.sources]
+eg2cpu = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest", "redis>=5", "fakeredis>=2.20"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

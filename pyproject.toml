@@ -1,2 +1,2 @@
 [tool.uv.workspace]
-members = ["eg2cpu"]
+members = ["eg2cpu", "hunch"]
