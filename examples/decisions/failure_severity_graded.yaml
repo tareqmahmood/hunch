@@ -1,0 +1,554 @@
+# Failure severity, graded: the second step of a hybrid program.
+#   step 1 (code):     the harness did not flag the result (span.is_error == "false") -> none
+#   step 2 (this):     a flagged result -> minor / recoverable / blocking
+#     minor        flagged, but harmless: an empty search, nothing to commit, checks still pending, cleanup failing
+#                  after the real work succeeded; the task can carry on as if it had worked
+#     recoverable  it failed, and the agent can fix it itself
+#     blocking     it failed for a reason outside the agent's reach: credentials, permissions, quotas, policy, outages
+# Calibrate on flagged errors only. Contrasts are the 36 situations of failure_severity.yaml with flagged-but-harmless
+# `minor` outputs, and bash failures carrying the harness's exit-code line.
+
+decision: failure_severity_graded
+kind: levels
+levels:
+- minor
+- recoverable
+- blocking
+unit: tool_result
+applies_when: span.kind == "tool_result" and span.is_error == "true"
+encoder: google/embeddinggemma-2@<rev>
+readout:
+  layer: final        # what layer: auto picks on every split of the labelled set
+  method: ridge       # method: auto would fall back to diff_of_means (no hard negatives), which grades worse
+calibration:
+  method: ordinal
+  sample: 60
+abstain:
+  mahalanobis_quantile: 0.99
+escalate:
+  when: confidence < 0.5
+  to: llm
+  prompt: 'Here is a tool call an AI coding agent made and the output it returned:
+
+
+    {unit}
+
+
+    How serious is the problem this result shows for the agent''s task? none: the call worked. minor: it worked,
+
+    with ignorable warnings or an empty result. recoverable: it failed and the agent can fix it itself. blocking:
+
+    it failed for a reason the agent can''t fix alone (credentials, permissions, quotas, policy, outages).'
+contrasts:
+- call: 'bash: {"command": "git push origin feature/login"}'
+  minor: 'Everything up-to-date
+
+    warning: could not update the local remote-tracking ref (lock busy); the remote branch is already current
+
+
+    Command exited with code 1'
+  recoverable: "To github.com:acme/app.git\n ! [rejected]        feature/login -> feature/login (non-fast-forward)\nhint:\
+    \ Updates were rejected because the tip of your current branch is behind\n\nCommand exited with code 1"
+  blocking: 'ERROR: Permission to acme/app.git denied to deploy-bot.
+
+    fatal: Could not read from remote repository.
+
+    Please make sure you have the correct access rights
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "npm test"}'
+  minor: 'No tests found related to files changed since last commit.
+
+    Run without --onlyChanged to run all tests.
+
+
+    Command exited with code 1'
+  recoverable: "FAIL src/cart.test.ts\n  ● total includes tax\n    expect(received).toBe(expected)\n    Expected: 108\n  \
+    \  Received: 100\nTests: 1 failed, 41 passed, 42 total\n\nCommand exited with code 1"
+  blocking: "Error: connect ECONNREFUSED 10.0.4.12:5432\n  Test database is unreachable; the CI database host is down (status\
+    \ page: major outage)\n\nCommand exited with code 1"
+- call: 'bash: {"command": "cargo build --release"}'
+  minor: '    Finished release [optimized] target(s) in 0.21s
+
+    warning: post-build hook `notify` not found; build artifacts are up to date
+
+
+    Command exited with code 1'
+  recoverable: "error[E0308]: mismatched types\n --> src/main.rs:12:5\n  |\n12 |     count\n  |     ^^^^^ expected `u64`,\
+    \ found `usize`\n\nCommand exited with code 1"
+  blocking: 'error: failed to download `serde v1.0.210`
+
+    Caused by: failed to get 200 response from `https://index.crates.io`, got 403
+
+    your organization''s network policy blocks this registry
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "pip install -r requirements.txt"}'
+  minor: 'Requirement already satisfied: numpy, pandas, requests (all pinned versions present)
+
+    WARNING: the script wrapper is outdated; nothing was changed
+
+
+    Command exited with code 1'
+  recoverable: 'ERROR: Could not find a version that satisfies the requirement pandsa==2.2.3 (from versions: none)
+
+    ERROR: No matching distribution found for pandsa==2.2.3
+
+
+    Command exited with code 1'
+  blocking: 'ERROR: Could not install packages due to an OSError: [Errno 28] No space left on device
+
+
+    Command exited with code 1'
+- call: 'read: {"path": "src/config/settings.py"}'
+  minor: '[Read skipped: the file is unchanged since it was last read in this session]'
+  recoverable: 'ENOENT: no such file or directory, access ''/repo/src/config/settings.py'''
+  blocking: 'EACCES: permission denied, open ''/repo/src/config/settings.py'' (file is owned by root; this session has no
+    sudo)'
+- call: 'edit: {"path": "src/api/users.ts", "oldText": "const limit = 10", "newText": "const limit = 50"}'
+  minor: No changes made to src/api/users.ts. The file already contains the requested text.
+  recoverable: Could not find the exact text in src/api/users.ts. The old text must match exactly including all whitespace
+    and newlines.
+  blocking: 'Write rejected: src/api/users.ts is in a read-only checkout mounted by the sandbox; edits are not permitted in
+    this environment.'
+- call: 'bash: {"command": "gh pr merge 418 --squash"}'
+  minor: '✓ Squashed and merged pull request #418
+
+    failed to delete local branch fix/webhook: used by worktree at /tmp/wt-418
+
+
+    Command exited with code 1'
+  recoverable: 'X Pull request #418 is not mergeable: the merge commit cannot be cleanly created. Rebase onto main and resolve
+    conflicts.
+
+
+    Command exited with code 1'
+  blocking: 'GraphQL: At least 2 approving reviews are required by reviewers with write access. (mergePullRequest)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "curl -s https://api.weather.example/v1/forecast?city=Lyon"}'
+  minor: '{"city":"Lyon","forecast":[{"day":"Mon","high":21}]}
+
+    curl: (23) Failure writing output to destination (stdout closed by head)
+
+
+    Command exited with code 23'
+  recoverable: '{"error":"invalid parameter ''city''; did you mean ''q''?","status":400}
+
+
+    Command exited with code 1'
+  blocking: '{"error":"rate limit exceeded: 1000 requests per day on the free plan; resets in 9 hours","status":429}
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "docker compose up -d"}'
+  minor: "[+] Running 3/3\n ✔ Container app-web-1  Running\nno containers to start: all services are already running\n\nCommand\
+    \ exited with code 1"
+  recoverable: 'Error response from daemon: driver failed programming external connectivity: Bind for 0.0.0.0:8080 failed:
+    port is already allocated
+
+
+    Command exited with code 1'
+  blocking: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running? (Docker Desktop
+    is not installed on this host)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "psql $DATABASE_URL -c \"select count(*) from orders\""}'
+  minor: "psql: warning: extra command-line argument \"-q\" ignored\n count\n-------\n 18234\n(1 row)\n\nCommand exited with\
+    \ code 2"
+  recoverable: 'ERROR:  relation "order" does not exist
+
+    LINE 1: select count(*) from order
+
+
+    Command exited with code 1'
+  blocking: 'psql: error: connection to server failed: FATAL:  password authentication failed for user "readonly"
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "python scripts/train.py --epochs 3"}'
+  minor: 'epoch 3 loss 0.544
+
+    saved checkpoint to runs/ckpt-3.pt
+
+    wandb: ERROR Unable to sync run (offline mode); logs kept locally
+
+
+    Command exited with code 1'
+  recoverable: "Traceback (most recent call last):\n  File \"scripts/train.py\", line 88, in <module>\n    model.fit(X, y,\
+    \ epcohs=3)\nTypeError: fit() got an unexpected keyword argument 'epcohs'\n\nCommand exited with code 1"
+  blocking: 'RuntimeError: CUDA error: no CUDA-capable device is detected (this machine has no GPU and the job needs one)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "kubectl rollout status deploy/api -n prod"}'
+  minor: 'Waiting for deployment "api" rollout to finish...
+
+    error: timed out waiting for the condition (the rollout continues; 2 of 3 replicas ready)
+
+
+    Command exited with code 1'
+  recoverable: 'error: deployment "api" exceeded its progress deadline: ImagePullBackOff: image ghcr.io/acme/api:v2.1.O not
+    found (typo in tag)
+
+
+    Command exited with code 1'
+  blocking: 'Error from server (Forbidden): deployments.apps "api" is forbidden: User "agent" cannot get resource "deployments"
+    in the namespace "prod"
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "rg -n \"TODO\" src"}'
+  minor: '(no output)
+
+
+    Command exited with code 1'
+  recoverable: "rg: regex parse error:\n    TODO(\n        ^\nerror: unclosed group\n\nCommand exited with code 1"
+  blocking: 'rg: src: Operation not permitted (os error 1) — the terminal app lacks Full Disk Access; grant it in System Settings
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "npm publish"}'
+  minor: '+ @acme/widgets@1.4.0
+
+    npm ERR! git tag v1.4.0 already exists (the version was published)
+
+
+    Command exited with code 1'
+  recoverable: 'npm ERR! 403 You cannot publish over the previously published versions: 1.3.9. Bump the version and retry.
+
+
+    Command exited with code 1'
+  blocking: 'npm ERR! code E401
+
+    npm ERR! Unable to authenticate, your authentication token seems to be invalid. Run npm login (requires the maintainer''s
+    2FA device).
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "terraform apply -auto-approve"}'
+  minor: 'No changes. Your infrastructure matches the configuration.
+
+
+    Command exited with code 2'
+  recoverable: "Error: Invalid reference\n  on main.tf line 14: resource \"aws_s3_bucket\" \"logs\" refers to undeclared variable\
+    \ \"bucket_nmae\"\n\nCommand exited with code 1"
+  blocking: 'Error: creating EC2 Instance: VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU
+    limit of 32 allows. Contact AWS support to raise the quota.
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "pytest tests/test_parser.py -q"}'
+  minor: 'no tests ran in 0.02s (all tests deselected by the -k filter)
+
+
+    Command exited with code 5'
+  recoverable: 'F....................... [100%]
+
+    FAILED tests/test_parser.py::test_empty_input - AssertionError: assert [] == None
+
+    1 failed, 23 passed in 0.66s
+
+
+    Command exited with code 1'
+  blocking: 'ERROR: could not load test plugins: license server license.acme.internal unreachable (VPN required) — pytest-acme
+    cannot run
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "git rebase origin/main"}'
+  minor: 'Successfully rebased and updated refs/heads/feature/search.
+
+    warning: hook post-rewrite exited 1 (lint cache rebuild skipped)
+
+
+    Command exited with code 1'
+  recoverable: 'CONFLICT (content): Merge conflict in src/search.ts
+
+    error: could not apply 7c9d1aa... add fuzzy matching
+
+    Resolve all conflicts manually, then run git rebase --continue
+
+
+    Command exited with code 1'
+  blocking: 'fatal: unable to access ''https://git.acme.internal/app.git/'': Could not resolve host: git.acme.internal (corporate
+    VPN is down)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "aws s3 cp build/ s3://acme-site/ --recursive"}'
+  minor: 'upload: build/index.html to s3://acme-site/index.html
+
+    warning: Skipping file build/.DS_Store. File is a hidden system file.
+
+
+    Command exited with code 2'
+  recoverable: 'upload failed: buid/index.html to s3://acme-site/index.html [Errno 2] No such file or directory: ''buid/index.html''
+
+
+    Command exited with code 1'
+  blocking: 'upload failed: An error occurred (AccessDenied) when calling the PutObject operation: Access Denied (the agent''s
+    IAM role has read-only access)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "go test ./..."}'
+  minor: "?   \tgithub.com/acme/app/cmd\t[no test files]\nno packages to test matched the pattern\n\nCommand exited with code\
+    \ 1"
+  recoverable: "--- FAIL: TestParse (0.01s)\n    parser_test.go:41: got 3, want 4\nFAIL\tgithub.com/acme/app/parser\t0.30s\n\
+    \nCommand exited with code 1"
+  blocking: 'go: github.com/acme/internal-lib@v1.2.0: reading https://proxy.golang.org: 410 Gone; private module requires
+    GOPRIVATE credentials the agent does not have
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "make deploy"}'
+  minor: 'Deployed version 2026.10.21-1 (3/3 hosts healthy)
+
+    make: *** [notify] Error 1 (Slack webhook not configured)
+
+
+    Command exited with code 2'
+  recoverable: 'make: *** No rule to make target ''deploy''.  Stop. (did you mean ''deploy-prod''?)
+
+
+    Command exited with code 1'
+  blocking: 'Deploy blocked: production is in a change freeze until Monday 09:00; changes need release-manager approval
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "openssl s_client -connect api.acme.com:443 </dev/null"}'
+  minor: 'CONNECTED(00000003)
+
+    Verify return code: 0 (ok)
+
+    DONE
+
+
+    Command exited with code 1'
+  recoverable: 's_client: Invalid option -conect; use -connect host:port
+
+
+    Command exited with code 1'
+  blocking: 'connect: Connection timed out
+
+    connect:errno=60 (the host blocks outbound 443 from this sandbox)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "brew install ffmpeg"}'
+  minor: 'Warning: ffmpeg 7.1 is already installed and up-to-date.
+
+
+    Command exited with code 1'
+  recoverable: 'Error: No available formula with the name "fmpeg". Did you mean ffmpeg?
+
+
+    Command exited with code 1'
+  blocking: 'Error: /opt/homebrew is not writable. You should change the ownership and permissions of /opt/homebrew back to
+    your user account (requires an admin password).
+
+
+    Command exited with code 1'
+- call: 'read: {"path": "logs/app.log", "offset": 5000, "limit": 100}'
+  minor: '[File is empty]'
+  recoverable: Offset 5000 is beyond end of file (4980 lines total)
+  blocking: 'EIO: i/o error, read — the network volume holding logs/ is unmounted (storage outage)'
+- call: 'bash: {"command": "npx tsc --noEmit"}'
+  minor: 'Found 0 errors. Watching for file changes. (interrupted)
+
+
+    Command exited with code 130'
+  recoverable: 'src/cart.ts(14,7): error TS2322: Type ''string'' is not assignable to type ''number''.
+
+
+    Command exited with code 1'
+  blocking: 'npm error code E403
+
+    npm error 403 Forbidden - GET https://registry.npmjs.org/typescript - your IP is blocked by the registry
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "gh issue create --title \"Flaky cart test\" --body-file issue.md"}'
+  minor: 'https://github.com/acme/app/issues/512
+
+    warning: could not add label ''flaky'': not found
+
+
+    Command exited with code 1'
+  recoverable: 'open issue.md: no such file or directory
+
+
+    Command exited with code 1'
+  blocking: 'HTTP 410: Issues are disabled for this repository (acme/app)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "ssh deploy@build-01 \"df -h /\""}'
+  minor: '/dev/sda1   200G  112G   88G  57% /
+
+    Connection to build-01 closed by remote host (session timeout after output)
+
+
+    Command exited with code 255'
+  recoverable: 'ssh: Could not resolve hostname bulid-01: nodename nor servname provided, or not known
+
+
+    Command exited with code 1'
+  blocking: 'deploy@build-01: Permission denied (publickey). The agent has no key for this host.
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "python -m alembic upgrade head"}'
+  minor: 'INFO  [alembic.runtime.migration] Will assume transactional DDL.
+
+    Target database is already at head; nothing to upgrade
+
+
+    Command exited with code 1'
+  recoverable: 'alembic.util.exc.CommandError: Multiple head revisions are present; please specify the target revision (merge
+    heads with alembic merge)
+
+
+    Command exited with code 1'
+  blocking: 'sqlalchemy.exc.OperationalError: permission denied for schema public: role "app_rw" lacks CREATE; ask the DBA
+    to grant it
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "yarn install"}'
+  minor: '✨  Already up-to-date.
+
+    warning: postinstall script for fsevents skipped (not macOS)
+
+
+    Command exited with code 1'
+  recoverable: 'error Couldn''t find package "lodahs@^4.17.21" required by "app@1.0.0" on the "npm" registry.
+
+
+    Command exited with code 1'
+  blocking: 'error An unexpected error occurred: "https://npm.acme.internal/react: getaddrinfo ENOTFOUND npm.acme.internal"
+    (private registry offline)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "ffmpeg -i input.mov -c:v libx264 out.mp4"}'
+  minor: '[mov,mp4] stream 2: unknown codec, ignoring
+
+    frame=  900 fps=205 Lsize=14512kB time=00:00:30.00 (finished)
+
+
+    Command exited with code 1'
+  recoverable: 'input.mov: No such file or directory
+
+
+    Command exited with code 1'
+  blocking: 'Unknown encoder ''libx264'' (this ffmpeg build has no GPL encoders and the agent cannot install packages here)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "dotnet build"}'
+  minor: "Build succeeded.\n    3 Warning(s)\n    0 Error(s)\nwarning: telemetry upload failed\n\nCommand exited with code\
+    \ 1"
+  recoverable: 'Program.cs(12,9): error CS0103: The name ''Consle'' does not exist in the current context
+
+    Build FAILED.
+
+
+    Command exited with code 1'
+  blocking: 'error NU1301: Unable to load the service index for source https://pkgs.dev.azure.com/acme/_packaging/feed: 401
+    (Unauthorized)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "stripe charges list --limit 3"}'
+  minor: '{"data":[]}
+
+
+    Command exited with code 1'
+  recoverable: 'unknown flag: --limt
+
+    Usage: stripe charges list [flags]
+
+
+    Command exited with code 1'
+  blocking: 'Error: Your API key has been revoked. Ask an account admin to issue a new restricted key.
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "git checkout -b fix/cart-total"}'
+  minor: 'Switched to a new branch ''fix/cart-total''
+
+    warning: unable to rmdir ''vendor/legacy'': Directory not empty
+
+
+    Command exited with code 1'
+  recoverable: 'fatal: a branch named ''fix/cart-total'' already exists
+
+
+    Command exited with code 1'
+  blocking: 'fatal: Unable to create ''/repo/.git/index.lock'': Read-only file system
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "playwright test e2e/checkout.spec.ts"}'
+  minor: "Running 4 tests using 2 workers\n  1 flaky\n  4 passed (18.0s)\n\nCommand exited with code 1"
+  recoverable: "  1) [chromium] checkout › pays with card\n    Error: locator.click: Timeout 5000ms exceeded. waiting for\
+    \ getByRole('button', { name: 'Pay' })\n\nCommand exited with code 1"
+  blocking: 'browserType.launch: Executable doesn''t exist at /ms-playwright/chromium-1105/chrome-linux/chrome and the sandbox
+    has no network to download it
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "openai api chat.completions.create -m gpt-x -g user hi"}'
+  minor: 'Hello! How can I help you today?
+
+    (warning: model gpt-x is deprecated)
+
+
+    Command exited with code 1'
+  recoverable: 'Error: Invalid value for ''-g'': expected ROLE CONTENT pairs
+
+
+    Command exited with code 1'
+  blocking: 'Error code: 429 - You exceeded your current quota, please check your plan and billing details.
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "sed -n 1,40p src/router.ts"}'
+  minor: 'sed: -e expression #1: warning: line 1 contains a NUL byte; continuing
+
+    import { Router } from "express";
+
+
+    Command exited with code 1'
+  recoverable: 'sed: can''t read src/routes.ts: No such file or directory
+
+
+    Command exited with code 1'
+  blocking: 'sed: couldn''t open file src/router.ts: Permission denied (file is encrypted at rest; the agent lacks the decryption
+    key)
+
+
+    Command exited with code 1'
+- call: 'bash: {"command": "helm upgrade api ./chart -n staging"}'
+  minor: 'Release "api" has been upgraded.
+
+    Error: failed to post-render the release notes (the release itself succeeded)
+
+
+    Command exited with code 1'
+  recoverable: 'Error: UPGRADE FAILED: template: api/templates/deploy.yaml:21:20: executing "api/templates/deploy.yaml" at
+    <.Values.image.tg>: nil pointer
+
+
+    Command exited with code 1'
+  blocking: 'Error: Kubernetes cluster unreachable: the server has asked for the client to provide credentials (token expired;
+    SSO login needs a human)
+
+
+    Command exited with code 1'

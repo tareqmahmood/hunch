@@ -1,0 +1,244 @@
+# How bad is the problem this tool result shows? Ordered levels.
+#   none         the call worked; nothing to act on
+#   minor        it worked (or found nothing), with warnings, partial results or noise the agent can ignore
+#   recoverable  it failed, and the agent can fix it itself: wrong path, typo, failing test, conflict, bad args
+#   blocking     it failed (or the result shows the task can't proceed) for a reason outside the agent's reach:
+#                credentials, permissions, quotas and rate limits, policy, outages
+# Contrasts: matched sets, the same call with an output at each level (written for this spec, not from traces).
+# Validate: examples/failure_severity/failure_severity.py (as a single handle it grades weakly; see failure_severity_graded.yaml)
+
+decision: failure_severity
+kind: levels
+levels: [none, minor, recoverable, blocking]
+unit: tool_result
+applies_when: span.kind == "tool_result"
+encoder: google/embeddinggemma-2@<rev>
+readout:
+  layer: final
+  method: ridge
+
+# Hard negatives: results that *discuss* errors without being one (source, docs, changelogs, tests). Read as none.
+hard_negatives:
+  - call: 'read: {"path": "src/http/retry.ts"}'
+    output: "// Retry on 429 (rate limit) and 503 (service unavailable) with exponential backoff.\nexport async function withRetry(fn) {\n  for (let i = 0; i < 5; i++) {\n    try { return await fn(); } catch (e) { if (!isRetryable(e)) throw e; }\n  }\n}"
+    label: none
+  - call: 'read: {"path": "docs/troubleshooting.md"}'
+    output: "## Permission denied\nIf you see `EACCES: permission denied`, check that the cache directory is writable.\n## 401 Unauthorized\nYour token has expired; run `acme login` again."
+    label: none
+  - call: 'read: {"path": "CHANGELOG.md", "offset": 1, "limit": 40}'
+    output: "## 2.4.1\n### Fixed\n- Fixed crash when the API returned 403 Forbidden for expired credentials\n- Fixed ECONNREFUSED errors not being retried\n- Quota exceeded errors now show the reset time"
+    label: none
+  - call: 'read: {"path": "tests/errors.test.ts"}'
+    output: "test(\"throws on invalid credentials\", async () => {\n  await expect(login(\"bad\")).rejects.toThrow(\"authentication failed\");\n});\ntest(\"maps 429 to RateLimitError\", () => { ... });"
+    label: none
+  - call: 'bash: {"command": "rg -n \"PermissionDenied|Forbidden\" src"}'
+    output: "src/errors.ts:12:export class PermissionDeniedError extends ApiError {}\nsrc/errors.ts:13:export class ForbiddenError extends ApiError {}\nsrc/api/client.ts:88:    if (res.status === 403) throw new ForbiddenError(body);"
+    label: none
+  - call: 'read: {"path": "src/auth/credentials.py"}'
+    output: "class CredentialsError(Exception):\n    \"\"\"Raised when stored credentials are missing or expired.\"\"\"\n\ndef load_credentials(path):\n    if not path.exists():\n        raise CredentialsError(f\"no credentials at {path}\")"
+    label: none
+  - call: 'bash: {"command": "gh issue view 812 --json title,body"}'
+    output: "{\"title\":\"Build fails with 'No space left on device' on CI\",\"body\":\"Since Tuesday the docker build step fails with ENOSPC. Steps to reproduce: ...\"}"
+    label: none
+  - call: 'read: {"path": "README.md", "offset": 120, "limit": 30}'
+    output: "### Rate limits\nThe free plan allows 1000 requests per day. When you exceed it the API returns `429 Too Many Requests` and a `Retry-After` header."
+    label: none
+
+calibration:
+  method: ordinal
+  sample: 60
+abstain:
+  mahalanobis_quantile: 0.99
+escalate:
+  when: "confidence < 0.5"
+  to: llm
+  prompt: |-
+    Here is a tool call an AI coding agent made and the output it returned:
+
+    {unit}
+
+    How serious is the problem this result shows for the agent's task? none: the call worked. minor: it worked,
+    with ignorable warnings or an empty result. recoverable: it failed and the agent can fix it itself. blocking:
+    it failed for a reason the agent can't fix alone (credentials, permissions, quotas, policy, outages).
+
+contrasts:
+- call: 'bash: {"command": "git push origin feature/login"}'
+  none: "To github.com:acme/app.git\n   4f2a1c3..9b8e7d6  feature/login -> feature/login"
+  minor: "remote: Resolving deltas: 100% (3/3)\nremote: warning: Large files detected. You may want to try Git Large File Storage\nTo github.com:acme/app.git\n   4f2a1c3..9b8e7d6  feature/login -> feature/login"
+  recoverable: "To github.com:acme/app.git\n ! [rejected]        feature/login -> feature/login (non-fast-forward)\nhint: Updates were rejected because the tip of your current branch is behind"
+  blocking: "ERROR: Permission to acme/app.git denied to deploy-bot.\nfatal: Could not read from remote repository.\nPlease make sure you have the correct access rights"
+- call: 'bash: {"command": "npm test"}'
+  none: "PASS src/cart.test.ts\nPASS src/auth.test.ts\nTests: 42 passed, 42 total\nTime: 3.1 s"
+  minor: "PASS src/cart.test.ts\n(node:4021) DeprecationWarning: Buffer() is deprecated\nTests: 42 passed, 42 total"
+  recoverable: "FAIL src/cart.test.ts\n  ● total includes tax\n    expect(received).toBe(expected)\n    Expected: 108\n    Received: 100\nTests: 1 failed, 41 passed, 42 total"
+  blocking: "Error: connect ECONNREFUSED 10.0.4.12:5432\n  Test database is unreachable; the CI database host is down (status page: major outage)"
+- call: 'bash: {"command": "cargo build --release"}'
+  none: "   Compiling app v0.3.0\n    Finished release [optimized] target(s) in 41.2s"
+  minor: "warning: unused variable: `idx`\n  --> src/main.rs:48:9\n    Finished release [optimized] target(s) in 41.9s"
+  recoverable: "error[E0308]: mismatched types\n --> src/main.rs:12:5\n  |\n12 |     count\n  |     ^^^^^ expected `u64`, found `usize`"
+  blocking: "error: failed to download `serde v1.0.210`\nCaused by: failed to get 200 response from `https://index.crates.io`, got 403\nyour organization's network policy blocks this registry"
+- call: 'bash: {"command": "pip install -r requirements.txt"}'
+  none: "Successfully installed numpy-2.1.0 pandas-2.2.3 requests-2.32.3"
+  minor: "WARNING: pip is being invoked by an old script wrapper.\nRequirement already satisfied: numpy in ./venv/lib (2.1.0)\nSuccessfully installed pandas-2.2.3"
+  recoverable: "ERROR: Could not find a version that satisfies the requirement pandsa==2.2.3 (from versions: none)\nERROR: No matching distribution found for pandsa==2.2.3"
+  blocking: "ERROR: Could not install packages due to an OSError: [Errno 28] No space left on device"
+- call: 'read: {"path": "src/config/settings.py"}'
+  none: "DEBUG = False\nALLOWED_HOSTS = [\"app.example.com\"]\nDATABASE_URL = env(\"DATABASE_URL\")"
+  minor: "[File truncated: showing first 2000 of 2400 lines]\nDEBUG = False\nALLOWED_HOSTS = [\"app.example.com\"]"
+  recoverable: "ENOENT: no such file or directory, access '/repo/src/config/settings.py'"
+  blocking: "EACCES: permission denied, open '/repo/src/config/settings.py' (file is owned by root; this session has no sudo)"
+- call: 'edit: {"path": "src/api/users.ts", "oldText": "const limit = 10", "newText": "const limit = 50"}'
+  none: "Successfully replaced text in src/api/users.ts."
+  minor: "Successfully replaced text in src/api/users.ts. Note: file has CRLF line endings; they were preserved."
+  recoverable: "Could not find the exact text in src/api/users.ts. The old text must match exactly including all whitespace and newlines."
+  blocking: "Write rejected: src/api/users.ts is in a read-only checkout mounted by the sandbox; edits are not permitted in this environment."
+- call: 'bash: {"command": "gh pr merge 418 --squash"}'
+  none: "✓ Squashed and merged pull request #418 (Add retry to webhook sender)"
+  minor: "✓ Squashed and merged pull request #418 (Add retry to webhook sender)\n! Could not delete local branch: checked out in another worktree"
+  recoverable: "X Pull request #418 is not mergeable: the merge commit cannot be cleanly created. Rebase onto main and resolve conflicts."
+  blocking: "GraphQL: At least 2 approving reviews are required by reviewers with write access. (mergePullRequest)"
+- call: 'bash: {"command": "curl -s https://api.weather.example/v1/forecast?city=Lyon"}'
+  none: "{\"city\":\"Lyon\",\"forecast\":[{\"day\":\"Mon\",\"high\":21,\"low\":12}]}"
+  minor: "{\"city\":\"Lyon\",\"forecast\":[],\"note\":\"partial data: 2 of 7 days available\"}"
+  recoverable: "{\"error\":\"invalid parameter 'city'; did you mean 'q'?\",\"status\":400}"
+  blocking: "{\"error\":\"rate limit exceeded: 1000 requests per day on the free plan; resets in 9 hours\",\"status\":429}"
+- call: 'bash: {"command": "docker compose up -d"}'
+  none: "[+] Running 3/3\n ✔ Container app-db-1     Started\n ✔ Container app-redis-1  Started\n ✔ Container app-web-1    Started"
+  minor: "WARN[0000] the attribute `version` is obsolete, it will be ignored\n[+] Running 3/3\n ✔ Container app-web-1    Started"
+  recoverable: "Error response from daemon: driver failed programming external connectivity: Bind for 0.0.0.0:8080 failed: port is already allocated"
+  blocking: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running? (Docker Desktop is not installed on this host)"
+- call: 'bash: {"command": "psql $DATABASE_URL -c \"select count(*) from orders\""}'
+  none: " count\n-------\n 18234\n(1 row)"
+  minor: "WARNING:  there is no transaction in progress\n count\n-------\n 18234\n(1 row)"
+  recoverable: "ERROR:  relation \"order\" does not exist\nLINE 1: select count(*) from order"
+  blocking: "psql: error: connection to server failed: FATAL:  password authentication failed for user \"readonly\""
+- call: 'bash: {"command": "python scripts/train.py --epochs 3"}'
+  none: "epoch 1 loss 0.812\nepoch 2 loss 0.611\nepoch 3 loss 0.544\nsaved checkpoint to runs/ckpt-3.pt"
+  minor: "UserWarning: TypedStorage is deprecated\nepoch 1 loss 0.812\nepoch 3 loss 0.544\nsaved checkpoint to runs/ckpt-3.pt"
+  recoverable: "Traceback (most recent call last):\n  File \"scripts/train.py\", line 88, in <module>\n    model.fit(X, y, epcohs=3)\nTypeError: fit() got an unexpected keyword argument 'epcohs'"
+  blocking: "RuntimeError: CUDA error: no CUDA-capable device is detected (this machine has no GPU and the job needs one)"
+- call: 'bash: {"command": "kubectl rollout status deploy/api -n prod"}'
+  none: "deployment \"api\" successfully rolled out"
+  minor: "Waiting for deployment \"api\" rollout to finish: 2 of 3 updated replicas are available...\ndeployment \"api\" successfully rolled out"
+  recoverable: "error: deployment \"api\" exceeded its progress deadline: ImagePullBackOff: image ghcr.io/acme/api:v2.1.O not found (typo in tag)"
+  blocking: "Error from server (Forbidden): deployments.apps \"api\" is forbidden: User \"agent\" cannot get resource \"deployments\" in the namespace \"prod\""
+- call: 'bash: {"command": "rg -n \"TODO\" src"}'
+  none: "src/cart.ts:14:// TODO: handle coupons\nsrc/auth.ts:88:// TODO: rotate keys"
+  minor: "(no output)\n\nCommand exited with code 1"
+  recoverable: "rg: regex parse error:\n    TODO(\n        ^\nerror: unclosed group"
+  blocking: "rg: src: Operation not permitted (os error 1) — the terminal app lacks Full Disk Access; grant it in System Settings"
+- call: 'bash: {"command": "npm publish"}'
+  none: "+ @acme/widgets@1.4.0"
+  minor: "npm notice package size: 41.2 kB\nnpm WARN publish npm auto-corrected some errors in your package.json\n+ @acme/widgets@1.4.0"
+  recoverable: "npm ERR! 403 You cannot publish over the previously published versions: 1.3.9. Bump the version and retry."
+  blocking: "npm ERR! code E401\nnpm ERR! Unable to authenticate, your authentication token seems to be invalid. Run npm login (requires the maintainer's 2FA device)."
+- call: 'bash: {"command": "terraform apply -auto-approve"}'
+  none: "Apply complete! Resources: 2 added, 1 changed, 0 destroyed."
+  minor: "Warning: Argument is deprecated (use `tags_all`)\n\nApply complete! Resources: 2 added, 1 changed, 0 destroyed."
+  recoverable: "Error: Invalid reference\n  on main.tf line 14: resource \"aws_s3_bucket\" \"logs\" refers to undeclared variable \"bucket_nmae\""
+  blocking: "Error: creating EC2 Instance: VcpuLimitExceeded: You have requested more vCPU capacity than your current vCPU limit of 32 allows. Contact AWS support to raise the quota."
+- call: 'bash: {"command": "pytest tests/test_parser.py -q"}'
+  none: "........................ [100%]\n24 passed in 0.62s"
+  minor: "........................ [100%]\n24 passed, 3 warnings in 0.70s"
+  recoverable: "F....................... [100%]\nFAILED tests/test_parser.py::test_empty_input - AssertionError: assert [] == None\n1 failed, 23 passed in 0.66s"
+  blocking: "ERROR: could not load test plugins: license server license.acme.internal unreachable (VPN required) — pytest-acme cannot run"
+- call: 'bash: {"command": "git rebase origin/main"}'
+  none: "Successfully rebased and updated refs/heads/feature/search."
+  minor: "warning: skipped previously applied commit 3b1f2e0\nSuccessfully rebased and updated refs/heads/feature/search."
+  recoverable: "CONFLICT (content): Merge conflict in src/search.ts\nerror: could not apply 7c9d1aa... add fuzzy matching\nResolve all conflicts manually, then run git rebase --continue"
+  blocking: "fatal: unable to access 'https://git.acme.internal/app.git/': Could not resolve host: git.acme.internal (corporate VPN is down)"
+- call: 'bash: {"command": "aws s3 cp build/ s3://acme-site/ --recursive"}'
+  none: "upload: build/index.html to s3://acme-site/index.html\nupload: build/app.js to s3://acme-site/app.js"
+  minor: "upload: build/index.html to s3://acme-site/index.html\nwarning: Skipping file build/.DS_Store. File is a hidden system file."
+  recoverable: "upload failed: buid/index.html to s3://acme-site/index.html [Errno 2] No such file or directory: 'buid/index.html'"
+  blocking: "upload failed: An error occurred (AccessDenied) when calling the PutObject operation: Access Denied (the agent's IAM role has read-only access)"
+- call: 'bash: {"command": "go test ./..."}'
+  none: "ok  \tgithub.com/acme/app/parser\t0.31s\nok  \tgithub.com/acme/app/vm\t0.12s"
+  minor: "ok  \tgithub.com/acme/app/parser\t0.31s\n?   \tgithub.com/acme/app/cmd\t[no test files]"
+  recoverable: "--- FAIL: TestParse (0.01s)\n    parser_test.go:41: got 3, want 4\nFAIL\tgithub.com/acme/app/parser\t0.30s"
+  blocking: "go: github.com/acme/internal-lib@v1.2.0: reading https://proxy.golang.org: 410 Gone; private module requires GOPRIVATE credentials the agent does not have"
+- call: 'bash: {"command": "make deploy"}'
+  none: "Deployed version 2026.10.21-1 to production (3/3 hosts healthy)"
+  minor: "Deployed version 2026.10.21-1 to production (3/3 hosts healthy)\nnote: CDN cache purge queued, may take 5 minutes"
+  recoverable: "make: *** No rule to make target 'deploy'.  Stop. (did you mean 'deploy-prod'?)"
+  blocking: "Deploy blocked: production is in a change freeze until Monday 09:00; changes need release-manager approval"
+- call: 'bash: {"command": "openssl s_client -connect api.acme.com:443 </dev/null"}'
+  none: "CONNECTED(00000003)\nVerify return code: 0 (ok)"
+  minor: "CONNECTED(00000003)\ndepth=0 CN = api.acme.com\nVerify return code: 0 (ok)\nDONE (certificate expires in 21 days)"
+  recoverable: "s_client: Invalid option -conect; use -connect host:port"
+  blocking: "connect: Connection timed out\nconnect:errno=60 (the host blocks outbound 443 from this sandbox)"
+- call: 'bash: {"command": "brew install ffmpeg"}'
+  none: "==> Pouring ffmpeg--7.1.arm64_sonoma.bottle.tar.gz\n🍺  /opt/homebrew/Cellar/ffmpeg/7.1: 285 files, 52.4MB"
+  minor: "Warning: ffmpeg 7.1 is already installed and up-to-date."
+  recoverable: "Error: No available formula with the name \"fmpeg\". Did you mean ffmpeg?"
+  blocking: "Error: /opt/homebrew is not writable. You should change the ownership and permissions of /opt/homebrew back to your user account (requires an admin password)."
+- call: 'read: {"path": "logs/app.log", "offset": 5000, "limit": 100}'
+  none: "2026-10-21T10:01:02Z INFO request ok path=/api/cart latency_ms=41"
+  minor: "Offset 5000 is beyond end of file (4980 lines total); showing the last 20 lines\n2026-10-21T10:01:02Z INFO request ok"
+  recoverable: "Offset 5000 is beyond end of file (4980 lines total)"
+  blocking: "EIO: i/o error, read — the network volume holding logs/ is unmounted (storage outage)"
+- call: 'bash: {"command": "npx tsc --noEmit"}'
+  none: "(no output)"
+  minor: "(no output)\nnpm warn exec The following package was not found and will be installed: tsc@2.0.4"
+  recoverable: "src/cart.ts(14,7): error TS2322: Type 'string' is not assignable to type 'number'."
+  blocking: "npm error code E403\nnpm error 403 Forbidden - GET https://registry.npmjs.org/typescript - your IP is blocked by the registry"
+- call: 'bash: {"command": "gh issue create --title \"Flaky cart test\" --body-file issue.md"}'
+  none: "https://github.com/acme/app/issues/512"
+  minor: "Warning: 1 label not found and was skipped: flaky\nhttps://github.com/acme/app/issues/512"
+  recoverable: "open issue.md: no such file or directory"
+  blocking: "HTTP 410: Issues are disabled for this repository (acme/app)"
+- call: 'bash: {"command": "ssh deploy@build-01 \"df -h /\""}'
+  none: "Filesystem  Size  Used Avail Use% Mounted on\n/dev/sda1   200G  112G   88G  57% /"
+  minor: "Warning: Permanently added 'build-01' (ED25519) to the list of known hosts.\n/dev/sda1   200G  112G   88G  57% /"
+  recoverable: "ssh: Could not resolve hostname bulid-01: nodename nor servname provided, or not known"
+  blocking: "deploy@build-01: Permission denied (publickey). The agent has no key for this host."
+- call: 'bash: {"command": "python -m alembic upgrade head"}'
+  none: "INFO  [alembic.runtime.migration] Running upgrade 3f2a -> 7b1c, add orders.status"
+  minor: "INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\nINFO  [alembic.runtime.migration] Will assume transactional DDL. (already at head)"
+  recoverable: "alembic.util.exc.CommandError: Multiple head revisions are present; please specify the target revision (merge heads with alembic merge)"
+  blocking: "sqlalchemy.exc.OperationalError: permission denied for schema public: role \"app_rw\" lacks CREATE; ask the DBA to grant it"
+- call: 'bash: {"command": "yarn install"}'
+  none: "✨  Done in 4.21s."
+  minor: "warning react-dom@18.3.1: unmet peer dependency \"react@^18\"\n✨  Done in 4.88s."
+  recoverable: "error Couldn't find package \"lodahs@^4.17.21\" required by \"app@1.0.0\" on the \"npm\" registry."
+  blocking: "error An unexpected error occurred: \"https://npm.acme.internal/react: getaddrinfo ENOTFOUND npm.acme.internal\" (private registry offline)"
+- call: 'bash: {"command": "ffmpeg -i input.mov -c:v libx264 out.mp4"}'
+  none: "frame=  900 fps=210 q=-1.0 Lsize=   14512kB time=00:00:30.00 bitrate=3962.4kbits/s\nvideo:14010kB audio:480kB"
+  minor: "[mov,mp4] stream 2: unknown codec, ignoring\nframe=  900 fps=205 Lsize=   14512kB time=00:00:30.00"
+  recoverable: "input.mov: No such file or directory"
+  blocking: "Unknown encoder 'libx264' (this ffmpeg build has no GPL encoders and the agent cannot install packages here)"
+- call: 'bash: {"command": "dotnet build"}'
+  none: "Build succeeded.\n    0 Warning(s)\n    0 Error(s)"
+  minor: "Build succeeded.\n    3 Warning(s)\n    0 Error(s)"
+  recoverable: "Program.cs(12,9): error CS0103: The name 'Consle' does not exist in the current context\nBuild FAILED."
+  blocking: "error NU1301: Unable to load the service index for source https://pkgs.dev.azure.com/acme/_packaging/feed: 401 (Unauthorized)"
+- call: 'bash: {"command": "stripe charges list --limit 3"}'
+  none: "{\"data\":[{\"id\":\"ch_3P1\",\"amount\":2000},{\"id\":\"ch_3P2\",\"amount\":500}]}"
+  minor: "{\"data\":[]} (no charges in test mode)"
+  recoverable: "unknown flag: --limt\nUsage: stripe charges list [flags]"
+  blocking: "Error: Your API key has been revoked. Ask an account admin to issue a new restricted key."
+- call: 'bash: {"command": "git checkout -b fix/cart-total"}'
+  none: "Switched to a new branch 'fix/cart-total'"
+  minor: "Switched to a new branch 'fix/cart-total'\nM\tsrc/cart.ts"
+  recoverable: "fatal: a branch named 'fix/cart-total' already exists"
+  blocking: "fatal: Unable to create '/repo/.git/index.lock': Read-only file system"
+- call: 'bash: {"command": "playwright test e2e/checkout.spec.ts"}'
+  none: "Running 4 tests using 2 workers\n  4 passed (12.3s)"
+  minor: "Running 4 tests using 2 workers\n  1 flaky\n    [chromium] checkout › pays with card (retry #1 passed)\n  4 passed (18.0s)"
+  recoverable: "  1) [chromium] checkout › pays with card\n    Error: locator.click: Timeout 5000ms exceeded. waiting for getByRole('button', { name: 'Pay' })"
+  blocking: "browserType.launch: Executable doesn't exist at /ms-playwright/chromium-1105/chrome-linux/chrome and the sandbox has no network to download it"
+- call: 'bash: {"command": "openai api chat.completions.create -m gpt-x -g user hi"}'
+  none: "Hello! How can I help you today?"
+  minor: "Hello! How can I help you today?\n(warning: model gpt-x is deprecated and will be removed on 2026-12-01)"
+  recoverable: "Error: Invalid value for '-g': expected ROLE CONTENT pairs"
+  blocking: "Error code: 429 - You exceeded your current quota, please check your plan and billing details."
+- call: 'bash: {"command": "sed -n 1,40p src/router.ts"}'
+  none: "import { Router } from \"express\";\nexport const router = Router();\nrouter.get(\"/health\", (_req, res) => res.send(\"ok\"));"
+  minor: "sed: warning: line 1 contains a NUL byte; output may be truncated\nimport { Router } from \"express\";"
+  recoverable: "sed: can't read src/routes.ts: No such file or directory"
+  blocking: "sed: couldn't open file src/router.ts: Permission denied (file is encrypted at rest; the agent lacks the decryption key)"
+- call: 'bash: {"command": "helm upgrade api ./chart -n staging"}'
+  none: "Release \"api\" has been upgraded. Happy Helming!\nREVISION: 14"
+  minor: "WARNING: Kubernetes configuration file is group-readable.\nRelease \"api\" has been upgraded. Happy Helming!"
+  recoverable: "Error: UPGRADE FAILED: template: api/templates/deploy.yaml:21:20: executing \"api/templates/deploy.yaml\" at <.Values.image.tg>: nil pointer"
+  blocking: "Error: Kubernetes cluster unreachable: the server has asked for the client to provide credentials (token expired; SSO login needs a human)"

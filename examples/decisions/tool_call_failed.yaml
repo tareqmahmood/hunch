@@ -1,0 +1,301 @@
+# Did the tool call itself fail (return an error or refuse the request)?
+# Compile:  eg2cpu-decisions compile decisions/tool_call_failed.yaml --calibration <60 labelled rows>
+# Contrasts: 56 matched synthetic pairs (`hunch_examples.synthetic`, seed 11). examples/tool_call_failed/tool_call_failed.py
+# compiles and checks it on real coding-agent traces.
+
+decision: tool_call_failed
+kind: boolean
+unit: tool_result                   # embeds "{call}\n{output}"
+applies_when: span.kind == "tool_result"
+
+encoder: google/embeddinggemma-2@<rev>
+readout:
+  layer: final                      # chosen on real traces, not the synthetic contrasts (pi test AUC 0.90; layer 4: 0.89)
+  method: auto                      # default (diff of means) unless it misreads a hard negative held out and the
+                                    # other method doesn't; else the one that misreads fewest. See the handle's report.
+
+hard_negatives:                     # look like "yes" but are "no": the tool worked, the world is broken
+  - "Speed test failed: No Connection."
+  - "No SIM card detected in the device."
+  - "Payment declined by the card issuer."
+  - "No flights available on the selected date."
+
+calibration:
+  method: platt
+  sample: 60
+abstain:
+  mahalanobis_quantile: 0.99
+escalate:
+  when: "|p - 0.5| < 0.2"
+  to: llm
+  prompt: |-
+    Here is a tool call an AI agent made and the output it returned:
+
+    {unit}
+
+    Did the tool call itself fail, i.e. return an error or refuse the request? A tool that ran successfully and
+    reports bad news about the world (for example a failed speed test or a missing SIM card) did NOT fail.
+
+contrasts:
+- call: 'bash: go test ./parser/...'
+  'yes': "--- FAIL: TestCompile (0.01s)\n    parser_test.go:593: got 3, want 4\nFAIL\nFAIL\tgithub.com/acme/app/parser\t0.8s"
+  'no': "ok  \tgithub.com/acme/app/parser\t0.8s"
+- call: 'bash: go test ./checker/...'
+  'yes': "--- FAIL: TestEval (0.01s)\n    checker_test.go:895: got 3, want 4\nFAIL\nFAIL\tgithub.com/acme/app/checker\t0.4s"
+  'no': "ok  \tgithub.com/acme/app/checker\t0.3s"
+- call: 'bash: go test ./vm/...'
+  'yes': "--- FAIL: TestEval (0.01s)\n    vm_test.go:507: got 3, want 4\nFAIL\nFAIL\tgithub.com/acme/app/vm\t0.3s"
+  'no': "ok  \tgithub.com/acme/app/vm\t0.2s"
+- call: 'bash: go test ./compiler/...'
+  'yes': "--- FAIL: TestCompile (0.01s)\n    compiler_test.go:330: got 3, want 4\nFAIL\nFAIL\tgithub.com/acme/app/compiler\t\
+    0.3s"
+  'no': "ok  \tgithub.com/acme/app/compiler\t0.2s"
+- call: 'bash: go test ./builtin/...'
+  'yes': "--- FAIL: TestEval (0.01s)\n    builtin_test.go:849: got 3, want 4\nFAIL\nFAIL\tgithub.com/acme/app/builtin\t0.1s"
+  'no': "ok  \tgithub.com/acme/app/builtin\t0.7s"
+- call: 'bash: go test ./optimizer/...'
+  'yes': "--- FAIL: TestCompile (0.01s)\n    optimizer_test.go:689: got 3, want 4\nFAIL\nFAIL\tgithub.com/acme/app/optimizer\t\
+    0.3s"
+  'no': "ok  \tgithub.com/acme/app/optimizer\t0.1s"
+- call: 'bash: go test ./conf/...'
+  'yes': "--- FAIL: TestEval (0.01s)\n    conf_test.go:84: got 3, want 4\nFAIL\nFAIL\tgithub.com/acme/app/conf\t0.1s"
+  'no': "ok  \tgithub.com/acme/app/conf\t0.1s"
+- call: 'bash: go test ./ast/...'
+  'yes': "--- FAIL: TestCheck (0.01s)\n    ast_test.go:267: got 3, want 4\nFAIL\nFAIL\tgithub.com/acme/app/ast\t0.1s"
+  'no': "ok  \tgithub.com/acme/app/ast\t0.8s"
+- call: 'bash: npm install'
+  'yes': |-
+    npm ERR! code ERESOLVE
+    npm ERR! unable to resolve dependency tree
+  'no': added 214 packages in 6s
+- call: 'bash: make build'
+  'yes': 'make: *** [build] Error 2'
+  'no': go build -o bin/app ./cmd/app
+- call: 'bash: cargo build'
+  'yes': |-
+    error[E0308]: mismatched types
+     --> src/main.rs:12:5
+  'no': Finished dev [unoptimized] target(s) in 2.31s
+- call: 'bash: ls config/'
+  'yes': 'ls: config/: No such file or directory'
+  'no': app.yaml  db.yaml  secrets.example
+- call: 'bash: git push origin main'
+  'yes': |-
+    ! [rejected] main -> main (fetch first)
+    error: failed to push some refs
+  'no': |-
+    To github.com:acme/app.git
+       3f2a1c0..9b8e7d1  main -> main
+- call: 'bash: docker compose up -d'
+  'yes': 'Error response from daemon: port is already allocated'
+  'no': |-
+    Container app-db-1  Started
+    Container app-web-1  Started
+- call: 'bash: pip install -r requirements.txt'
+  'yes': 'ERROR: Could not find a version that satisfies the requirement torchx==9.9'
+  'no': Successfully installed requests-2.32.3 urllib3-2.2.1
+- call: 'bash: chmod +x deploy.sh && ./deploy.sh'
+  'yes': './deploy.sh: line 14: kubectl: command not found'
+  'no': |-
+    deployment.apps/web configured
+    rollout complete
+- call: 'http_get: /v1/users/42'
+  'yes': |-
+    HTTP 401
+    {"error": "unauthorized"}
+  'no': |-
+    HTTP 200
+    {"data": {"id": 452, "status": "ok", "items": 19}}
+- call: 'http_get: /v1/orders?status=open'
+  'yes': |-
+    HTTP 500
+    {"error": "internal server error"}
+  'no': |-
+    HTTP 200
+    {"data": {"id": 532, "status": "ok", "items": 8}}
+- call: 'http_get: /v1/invoices/2026-09'
+  'yes': |-
+    HTTP 401
+    {"error": "unauthorized"}
+  'no': |-
+    HTTP 200
+    {"data": {"id": 512, "status": "ok", "items": 1}}
+- call: 'http_get: /v1/search?q=refund'
+  'yes': |-
+    HTTP 404
+    {"error": "not found"}
+  'no': |-
+    HTTP 200
+    {"data": {"id": 469, "status": "ok", "items": 21}}
+- call: 'http_get: /v1/accounts/acme/limits'
+  'yes': |-
+    HTTP 401
+    {"error": "unauthorized"}
+  'no': |-
+    HTTP 200
+    {"data": {"id": 417, "status": "ok", "items": 18}}
+- call: 'http_get: /v1/tickets/8812'
+  'yes': |-
+    HTTP 404
+    {"error": "not found"}
+  'no': |-
+    HTTP 200
+    {"data": {"id": 725, "status": "ok", "items": 9}}
+- call: 'http_get: /v1/reports/daily'
+  'yes': |-
+    HTTP 401
+    {"error": "unauthorized"}
+  'no': |-
+    HTTP 200
+    {"data": {"id": 777, "status": "ok", "items": 8}}
+- call: 'http_get: /v1/payments/retry'
+  'yes': |-
+    HTTP 400
+    {"error": "invalid parameter 'status'"}
+  'no': |-
+    HTTP 200
+    {"data": {"id": 296, "status": "ok", "items": 1}}
+- call: 'read: src/app.ts'
+  'yes': 'Error: ENOENT: no such file or directory, open ''src/app.ts'''
+  'no': |-
+    1: // src/app.ts
+    2: import x from 'y'
+    3: export function run() { return 1 }
+- call: 'edit: src/app.ts (replace ''return 1'' with ''return 2'')'
+  'yes': 'Error: Could not find the exact text to replace in src/app.ts. The old text must match exactly.'
+  'no': Successfully replaced text in src/app.ts.
+- call: 'read: internal/store/db.go'
+  'yes': 'Error: ENOENT: no such file or directory, open ''internal/store/db.go'''
+  'no': |-
+    1: // internal/store/db.go
+    2: import x from 'y'
+    3: export function run() { return 1 }
+- call: 'edit: internal/store/db.go (replace ''return 1'' with ''return 2'')'
+  'yes': 'Error: Could not find the exact text to replace in internal/store/db.go. The old text must match exactly.'
+  'no': Successfully replaced text in internal/store/db.go.
+- call: 'read: README.md'
+  'yes': 'Error: ENOENT: no such file or directory, open ''README.md'''
+  'no': |-
+    1: // README.md
+    2: import x from 'y'
+    3: export function run() { return 1 }
+- call: 'edit: README.md (replace ''return 1'' with ''return 2'')'
+  'yes': 'Error: Could not find the exact text to replace in README.md. The old text must match exactly.'
+  'no': Successfully replaced text in README.md.
+- call: 'read: config/settings.py'
+  'yes': 'Error: ENOENT: no such file or directory, open ''config/settings.py'''
+  'no': |-
+    1: // config/settings.py
+    2: import x from 'y'
+    3: export function run() { return 1 }
+- call: 'edit: config/settings.py (replace ''return 1'' with ''return 2'')'
+  'yes': 'Error: Could not find the exact text to replace in config/settings.py. The old text must match exactly.'
+  'no': Successfully replaced text in config/settings.py.
+- call: 'read: lib/utils.rb'
+  'yes': 'Error: ENOENT: no such file or directory, open ''lib/utils.rb'''
+  'no': |-
+    1: // lib/utils.rb
+    2: import x from 'y'
+    3: export function run() { return 1 }
+- call: 'edit: lib/utils.rb (replace ''return 1'' with ''return 2'')'
+  'yes': 'Error: Could not find the exact text to replace in lib/utils.rb. The old text must match exactly.'
+  'no': Successfully replaced text in lib/utils.rb.
+- call: 'read: pkg/api/handler.go'
+  'yes': 'Error: ENOENT: no such file or directory, open ''pkg/api/handler.go'''
+  'no': |-
+    1: // pkg/api/handler.go
+    2: import x from 'y'
+    3: export function run() { return 1 }
+- call: 'edit: pkg/api/handler.go (replace ''return 1'' with ''return 2'')'
+  'yes': 'Error: Could not find the exact text to replace in pkg/api/handler.go. The old text must match exactly.'
+  'no': Successfully replaced text in pkg/api/handler.go.
+- call: 'read: web/index.html'
+  'yes': 'Error: ENOENT: no such file or directory, open ''web/index.html'''
+  'no': |-
+    1: // web/index.html
+    2: import x from 'y'
+    3: export function run() { return 1 }
+- call: 'edit: web/index.html (replace ''return 1'' with ''return 2'')'
+  'yes': 'Error: Could not find the exact text to replace in web/index.html. The old text must match exactly.'
+  'no': Successfully replaced text in web/index.html.
+- call: 'read: scripts/migrate.sql'
+  'yes': 'Error: ENOENT: no such file or directory, open ''scripts/migrate.sql'''
+  'no': |-
+    1: // scripts/migrate.sql
+    2: import x from 'y'
+    3: export function run() { return 1 }
+- call: 'edit: scripts/migrate.sql (replace ''return 1'' with ''return 2'')'
+  'yes': 'Error: Could not find the exact text to replace in scripts/migrate.sql. The old text must match exactly.'
+  'no': Successfully replaced text in scripts/migrate.sql.
+- call: 'bash: python -c ''import pandas; pandas.run()'''
+  'yes': |-
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    AttributeError: module 'pandas' has no attribute 'run'
+  'no': ran pandas.run() in 0.42s; 128 rows processed
+- call: 'bash: python -c ''import numpy; numpy.run()'''
+  'yes': |-
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    AttributeError: module 'numpy' has no attribute 'run'
+  'no': ran numpy.run() in 0.42s; 128 rows processed
+- call: 'bash: python -c ''import requests; requests.run()'''
+  'yes': |-
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    AttributeError: module 'requests' has no attribute 'run'
+  'no': ran requests.run() in 0.42s; 128 rows processed
+- call: 'bash: python -c ''import app.main; app.main.run()'''
+  'yes': |-
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    AttributeError: module 'app.main' has no attribute 'run'
+  'no': ran app.main.run() in 0.42s; 128 rows processed
+- call: 'bash: python -c ''import utils.parse; utils.parse.run()'''
+  'yes': |-
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    AttributeError: module 'utils.parse' has no attribute 'run'
+  'no': ran utils.parse.run() in 0.42s; 128 rows processed
+- call: 'bash: python -c ''import models.user; models.user.run()'''
+  'yes': |-
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    AttributeError: module 'models.user' has no attribute 'run'
+  'no': ran models.user.run() in 0.42s; 128 rows processed
+- call: 'bash: python -c ''import etl.load; etl.load.run()'''
+  'yes': |-
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    AttributeError: module 'etl.load' has no attribute 'run'
+  'no': ran etl.load.run() in 0.42s; 128 rows processed
+- call: 'bash: python -c ''import api.client; api.client.run()'''
+  'yes': |-
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    AttributeError: module 'api.client' has no attribute 'run'
+  'no': ran api.client.run() in 0.42s; 128 rows processed
+- call: 'sql: SELECT * FROM users WHERE id = 7'
+  'yes': 'ERROR:  relation "invoces" does not exist'
+  'no': DELETE 37
+- call: 'sql: SELECT count(*) FROM orders'
+  'yes': 'ERROR:  relation "invoces" does not exist'
+  'no': INSERT 0 1
+- call: 'sql: UPDATE accounts SET tier=''pro'' WHERE id=3'
+  'yes': 'ERROR:  relation "invoces" does not exist'
+  'no': UPDATE 1
+- call: 'sql: SELECT name FROM products ORDER BY price DESC LIMIT 5'
+  'yes': 'ERROR:  column "expired" does not exist'
+  'no': "(1 row)\n id | name  \n  7 | Alice"
+- call: 'sql: INSERT INTO audit(event) VALUES (''login'')'
+  'yes': 'ERROR:  relation "invoces" does not exist'
+  'no': " avg \n 81.40\n(1 row)"
+- call: 'sql: SELECT * FROM invoces'
+  'yes': 'ERROR:  relation "invoces" does not exist'
+  'no': " count \n 1842\n(1 row)"
+- call: 'sql: DELETE FROM sessions WHERE expired'
+  'yes': 'ERROR:  syntax error at or near "WHERE"'
+  'no': "(1 row)\n id | name  \n  7 | Alice"
+- call: 'sql: SELECT avg(total) FROM payments'
+  'yes': 'ERROR:  column "expired" does not exist'
+  'no': INSERT 0 1

@@ -1,0 +1,18 @@
+[project]
+name = "hunch-examples"
+version = "0.1.0"
+description = "Examples for eg2cpu and hunch on public datasets: compiled decisions, levels, layer choice and the proxy"
+license = "MIT OR Apache-2.0"
+requires-python = ">=3.12"
+dependencies = ["eg2cpu", "hunch", "numpy", "pyyaml", "scikit-learn", "pyarrow", "huggingface_hub"]
+
+[tool.uv.sources]
+eg2cpu = { workspace = true }
+hunch = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hunch_examples"]
