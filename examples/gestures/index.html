@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hunch gestures</title>
+<style>
+  :root { --bg: #111317; --panel: #1b1e24; --ink: #e8e8ea; --dim: #8a8f98; --bar: #3a7bfd; --hit: #36c275; --alarm: #ff5a1f; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; padding: 20px; max-width: 1240px; margin: auto; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .stage { position: relative; align-self: start; }
+  video { width: 100%; border-radius: 12px; transform: scaleX(-1); background: #000; display: block; transition: box-shadow .2s; }
+  .stage.alarm video { box-shadow: 0 0 0 5px var(--alarm), 0 0 48px var(--alarm); animation: pulse .6s infinite alternate; }
+  @keyframes pulse { to { box-shadow: 0 0 0 9px var(--alarm), 0 0 80px var(--alarm); } }
+  .bigs { position: absolute; right: 14px; top: 8px; display: flex; flex-direction: column; align-items: flex-end; }
+  .big { font-size: 88px; line-height: 1.1; filter: drop-shadow(0 4px 12px #000a); transition: transform .15s; }
+  .big.pop { transform: scale(1.25); }
+  .banner { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--alarm); color: #fff;
+            font-weight: 800; font-size: 28px; letter-spacing: .04em; padding: 6px 22px; border-radius: 999px; display: none; }
+  .stage.alarm .banner { display: block; }
+  .teaching { position: absolute; left: 16px; top: 16px; background: #d93025; color: #fff; padding: 6px 12px; border-radius: 999px; font-weight: 600; display: none; }
+  .meter { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--dim); margin-top: 10px; font-variant-numeric: tabular-nums; }
+  .meter b { color: var(--ink); }
+  aside { display: flex; flex-direction: column; gap: 12px; }
+  section { background: var(--panel); border-radius: 12px; padding: 12px 16px; }
+  h1 { font-size: 16px; margin: 0 0 2px; }
+  .mode { color: var(--dim); font-size: 13px; margin-bottom: 4px; }
+  .row { display: grid; grid-template-columns: 30px 30px 1fr 40px 34px; align-items: center; gap: 6px; margin: 5px 0; }
+  .row.top .label { color: var(--hit); font-weight: 600; }
+  .key { font: 12px ui-monospace, monospace; color: var(--dim); border: 1px solid #444; border-radius: 4px; text-align: center; padding: 1px 0; }
+  .emoji { font-size: 20px; text-align: center; }
+  .track { position: relative; height: 20px; background: #262a31; border-radius: 4px; overflow: hidden; }
+  .fill { position: absolute; inset: 0 auto 0 0; background: var(--bar); width: 0; transition: width .12s; }
+  .row.top .fill { background: var(--hit); }
+  .row.top.alert .fill { background: var(--alarm); }
+  .zero { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff8; }
+  .label { position: absolute; left: 8px; top: 0; font-size: 13px; }
+  .pct, .n { font-variant-numeric: tabular-nums; text-align: right; font-size: 13px; }
+  .n { color: var(--dim); }
+  .help { color: var(--dim); font-size: 13px; }
+  button { background: #2b3038; color: var(--ink); border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <div class="stage" id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="bigs" id="bigs"></div>
+    <div class="banner" id="banner"></div>
+    <div class="teaching" id="teaching"></div>
+    <div class="meter">
+      <span><b id="fps">–</b> fps</span>
+      <span><b id="ms">–</b> ms per frame (EG2, CPU, every question)</span>
+      <span><b id="frames">0</b> frames</span>
+      <span><b>$0.00</b> spent</span>
+    </div>
+  </div>
+  <aside>
+    <div id="questions" style="display: contents"></div>
+    <div class="help">
+      Make the sign (or show the thing), then hold its <b>key</b> to teach: frames are labelled from 0.4 s after the
+      key goes down. Detectors take <b>key</b> for yes and <b>shift+key</b> for no, and one second of each, in the same
+      scene, is enough. The white tick is the zero-shot answer; the bar is what it answers.
+      <p><button id="forget">Forget what I taught</button></p>
+    </div>
+  </aside>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const pretty = s => s.replace("_", " ");
+const SETTLE_MS = 400;  // frames this soon after a key goes down catch the hand moving into place, so they aren't labelled
+let questions = {}, byKey = {}, held = null, heldSince = 0, frames = 0, stamps = [];
+const shown = {}, streak = {};
+
+async function setup() {
+  questions = (await (await fetch("/questions")).json()).questions;
+  $("questions").innerHTML = Object.entries(questions).map(([q, spec]) => `
+    <section id="q-${q}"><h1>${spec.title}</h1><div class="mode"></div>
+      ${spec.answers.map(a => `
+        <div class="row${a.alert ? " alert" : ""}" id="row-${q}-${a.name}">
+          <span class="key">${a.key}</span><span class="emoji">${a.emoji}</span>
+          <div class="track"><div class="fill"></div><div class="zero"></div><span class="label">${pretty(a.name)}</span></div>
+          <span class="pct">–</span><span class="n">0</span>
+        </div>`).join("")}
+    </section>`).join("");
+  $("bigs").innerHTML = Object.keys(questions).map(q => `<div class="big" id="big-${q}"></div>`).join("");
+  for (const [q, spec] of Object.entries(questions)) spec.answers.forEach(a => byKey[a.press || a.key] = { q, name: a.name });
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  $("video").srcObject = stream;
+  await $("video").play();
+  loop();
+}
+
+const canvas = document.createElement("canvas");
+canvas.width = canvas.height = 384;
+
+async function loop() {  // one frame in flight at a time, so the answers keep up with the camera
+  const v = $("video"), side = Math.min(v.videoWidth, v.videoHeight);
+  canvas.getContext("2d").drawImage(v, (v.videoWidth - side) / 2, (v.videoHeight - side) / 2, side, side, 0, 0, 384, 384);
+  const jpeg = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.85));
+  const headers = held && performance.now() - heldSince > SETTLE_MS ? { "X-Label": held.q + "/" + held.name } : {};
+  try {
+    show(await (await fetch("/frame", { method: "POST", body: jpeg, headers })).json());
+  } catch (e) { await new Promise(r => setTimeout(r, 500)); }
+  requestAnimationFrame(loop);
+}
+
+function show(out) {
+  frames++;
+  const now = performance.now();
+  stamps.push(now);
+  stamps = stamps.filter(t => now - t < 2000);
+  $("fps").textContent = (stamps.length / 2).toFixed(1);
+  $("ms").textContent = out.ms.toFixed(0);
+  $("frames").textContent = frames;
+  const alarms = [];
+  for (const [q, a] of Object.entries(out.questions)) {
+    const best = showQuestion(q, a);
+    if (best.alert) alarms.push(best.emoji + " " + q.toUpperCase());
+  }
+  $("stage").classList.toggle("alarm", alarms.length > 0);
+  $("banner").textContent = alarms.join("  ");
+}
+
+function showQuestion(q, out) {
+  const answers = questions[q].answers;
+  const best = Object.entries(out.p).sort((a, b) => b[1] - a[1])[0][0];
+  for (const ans of answers) {
+    const row = $(`row-${q}-${ans.name}`);
+    row.classList.toggle("top", ans.name === best);
+    row.querySelector(".fill").style.width = (out.p[ans.name] * 100) + "%";
+    const tick = row.querySelector(".zero");
+    tick.style.display = out.zero ? "block" : "none";
+    if (out.zero) tick.style.left = (out.zero[ans.name] * 100) + "%";
+    row.querySelector(".pct").textContent = Math.round(out.p[ans.name] * 100) + "%";
+    row.querySelector(".n").textContent = out.labelled[ans.name];
+  }
+  $("q-" + q).querySelector(".mode").textContent = out.mode;
+  // the big emoji and the alarm change after two frames in a row agree, so they don't flicker
+  streak[q] = best === shown[q] ? 0 : (streak[q] || 0) + 1;
+  if (streak[q] >= 2 || shown[q] === undefined) {
+    shown[q] = best; streak[q] = 0;
+    const a = answers.find(a => a.name === best), big = $("big-" + q);
+    big.textContent = a.quiet ? "" : a.emoji;
+    big.classList.add("pop");
+    setTimeout(() => big.classList.remove("pop"), 150);
+  }
+  return answers.find(a => a.name === shown[q]);
+}
+
+addEventListener("keydown", e => {
+  const hit = byKey[e.key];
+  if (hit && !e.metaKey && !e.ctrlKey && hit !== held) {
+    held = hit;
+    heldSince = performance.now();
+    $("teaching").style.display = "block";
+    $("teaching").textContent = `teaching ${hit.q}: ${pretty(hit.name)}`;
+  }
+});
+addEventListener("keyup", e => {  // shift may be released before the letter, so any key of the held question ends it
+  const hit = byKey[e.key] || byKey[e.key.toLowerCase()] || byKey[e.key.toUpperCase()];
+  if (held && (hit?.q === held.q || e.key === "Shift")) { held = null; $("teaching").style.display = "none"; }
+});
+$("forget").onclick = () => fetch("/forget", { method: "POST" });
+setup().catch(e => { $("teaching").style.display = "block"; $("teaching").textContent = "camera unavailable: " + e.message; });
+</script>
+</body>
+</html>
