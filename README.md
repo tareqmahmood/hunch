@@ -1,8 +1,8 @@
 # hunch
 
-hunch is a systemone-style server that answers questions about what AI agents do, such as "did this tool call fail?" or 
-"does this output contain a prompt injection?", on CPU in milliseconds. It learns them from a slower model you already use, and keeps checking
-itself against that model.
+hunch is a systemone-style server that answers questions (e.g. "did this tool call fail?" or 
+"does this output contain a prompt injection?"), on CPU in milliseconds. It learns and then graduates from a slower, more expensive "teacher" model and
+keeps itself up-to-date by checking in, even after it graduates.
 
 If LLMs are about _thinking hard_, and decision models are about fast _intuition_, hunch is like the fast _reflex_
 system you can use for repetitive tasks.
