@@ -59,6 +59,10 @@ Before we tell you more about hunch, some useful things to know:
   of yes.
 - **Teacher:** the model you would otherwise call for every question, such as a decision model (Clef, Jev, etc) or an LLM-as-judge (frontier model or otherwise).
 - **Student:** hunch's small classifier for one question, which reads an embedding of the state from EmbeddingGemma 2.
+- **State:** what you're asking the question about.
+- **Graduation:** where hunch starts answering on its own (cross-validation on the
+  teacher's answers shows it agrees with the teacher often enough)
+- **Audit:** after graduation, some of the student's answers also go to the teacher to check up.
 
 hunch trains the student on the teacher's judgements and then takes over once it is confident enough.
 
