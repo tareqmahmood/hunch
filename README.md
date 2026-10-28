@@ -1,7 +1,7 @@
 # hunch
 
-hunch answers questions about what AI agents do, such as "did this tool call fail?" or "does this output contain a
-prompt injection?", on CPU in milliseconds. It learns them from a slower model you already use, and keeps checking
+hunch is a systemone-style server that answers questions about what AI agents do, such as "did this tool call fail?" or 
+"does this output contain a prompt injection?", on CPU in milliseconds. It learns them from a slower model you already use, and keeps checking
 itself against that model.
 
 If LLMs are about _thinking hard_, and decision models are about fast _intuition_, hunch is like the fast _reflex_
@@ -16,15 +16,35 @@ milliseconds of latency.
 
 *synthetic tool calls, hunch vs clef vs luna (serialized)*
 
-## Prelude
+### But not just that!
 
-Some useful things to know:
+hunch is designed for fast decisions on high-volume data. Agent traces are one source, but it can be anything: log files,
+user comments, transcripts... anything you like! (multi-modal support in the hunch proxy is coming soon)
+
+hunch also ships with `hunch.live` - a Python and TypeScript library allowing you to build dynamic `choice`-style questions
+in real-time on both text and images, learning from both a teacher model and user feedback.
+
+### Caveats
+
+hunch works for a lot of questions, but not all questions. hunch is fast because it doesn't think, so that means if your
+questions need a lot of indirect reasoning, the other judges will be a better fit (we have some [question design guidance for this](docs/question-design.md)). 
+But don't worry - if hunch never graduates from learning, it keeps passing the questions up to the teacher indefinitely
+instead of trying to answer something it isn't capable of.
+
+## Ok, I'm hooked!
+
+hunch is built on top of EmbeddingGemma2 - a model that takes multimodal input (text, images, audio) and spits out a
+giant vector representing semantic concepts from that input.
+
+Before we tell you more about hunch, some useful things to know:
 
 - **Structured decisions:** a question with a fixed kind of answer: yes or no (`noul`), one of named options (`choice`), or
   one of ordered levels (`score`). `noul` is the protocol's name for a yes/no question, answered as the probability
   of yes.
-- **Teacher:** the model you would otherwise call for every question, such as an LLM judge.
+- **Teacher:** the model you would otherwise call for every question, such as a decision model (Clef, Jev, etc) or an LLM-as-judge (frontier model or otherwise).
 - **Student:** hunch's small classifier for one question, which reads an embedding of the state from EmbeddingGemma 2.
+
+hunch trains the student on the teacher's judgements and then takes over once it is confident enough.
 
 ## Why
 
@@ -38,7 +58,7 @@ judge: hundreds of milliseconds and a model call per question.
 Most of those questions are easy most of the time. hunch sits in front of your judge and learns from its answers. A
 question's student starts answering only once cross-validation shows it agrees with the judge often enough, and it
 keeps being audited against the judge afterwards. Everything else, including any state unlike those it learned from,
-still goes to the judge. You keep your judge; you call it less.
+still goes to the judge. You keep your judge in the loop, but you call it less.
 
 - **Cheaper and faster.** On 2,000 real coding-agent tool results, hunch's students answered 69–75% of requests
   with no judge call over the last 500. For the output kind they agree with the judge 97% of the time, where always
@@ -52,8 +72,7 @@ still goes to the judge. You keep your judge; you call it less.
   flag 47% of ordinary coding-agent outputs. Judges have blind spots too: the test judge caught only 20% of politely
   worded prompt injections, where a student trained on labels caught 81% of held-out ones. The examples' judge is
   Clef (Clef-Flash, a 9B model run locally in 4-bit MLX).
-- **No GPU, and nothing leaves your machines.** The encoder is a Rust engine for commodity CPUs. The judge's answers
-  can be recorded and replayed offline by hash.
+- **No GPU, and nothing leaves your machines.** The encoder is a Rust engine for commodity CPUs.
 
 **When it doesn't fit:** questions whose answer isn't in the text itself. "How bad is this failure, and who can fix
 it?" needs context and reasoning, and stays with the judge. [docs/question-design.md](docs/question-design.md) has a
@@ -82,8 +101,7 @@ pre-flight check that tells you which of your questions hunch can take over befo
 
 ## Setup
 
-You need Rust (1.88 or later) and [uv](https://docs.astral.sh/uv/). The packages form a uv workspace, and uv builds
-eg2cpu's Python extension with maturin.
+You need Rust (1.88 or later) and [uv](https://docs.astral.sh/uv/). `uv` and `maturin` are used to build eg2cpu's Python extension.
 
 ```bash
 uv sync --all-packages
@@ -97,7 +115,7 @@ The proxy's tests don't need the model; running hunch, the examples and eg2cpu's
 ## Tests
 
 ```bash
-(cd eg2cpu && cargo test --release)          # kernels, the forward pass against PyTorch fp32, concurrency
+(cd eg2cpu && cargo test --release)
 uv run --package eg2cpu pytest -q eg2cpu/tests
 uv run --package hunch pytest -q hunch/tests
 ```
