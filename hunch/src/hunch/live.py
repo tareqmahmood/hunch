@@ -1,5 +1,5 @@
-"""hunch.live: questions about a live stream (a webcam, or texts as they arrive), answered from one EG2 embedding per
-item.
+"""hunch.live: questions about a live stream (images from a camera, or texts as they arrive), answered from one EG2
+embedding per item.
 
 The proxy (`hunch.proxy`) learns typed questions about text states behind a teacher. This is the same idea for a
 stream that a person watches and teaches as it goes: every item wants an answer as it arrives, and the answers it
@@ -11,7 +11,7 @@ frame.
   Choice    picks one answer. Every answer has text prompts, so it answers zero-shot from the start; labelled
             frames train a student, which answers as far as a frame resembles what it was taught. Answers can be
             added while it runs, and `forget` goes back to the ones it started with.
-  Detector  says yes or no: text prompts, plus a direction taught from one frame with the thing and one without.
+  Detector  says yes or no: text prompts, plus a direction taught from one frame labelled yes and one labelled no.
   Watcher   a teacher model watching the stream: it looks at the newest frame when that's worth it, one look at a
             time, and labels the frames it's sure about for a Choice's student.
   Album     labelled frames on disk (the image or text, its embedding, labels.jsonl), to teach again after a restart.
@@ -19,22 +19,38 @@ frame.
 How a Choice answers:
   zero-shot  a frame scores each answer by its mean similarity to the answer's prompts, standardised across the
              answers; a softmax at `temperature` makes those probabilities.
-  baseline   frames labelled with the `empty` answer (empty hands, nothing to show) are the baseline: a frame's
-             distance from them, in their own spreads, says whether anything is being shown (`shown`), and what
-             differs from them, compared with the same for every taught frame, says how much the frame resembles
-             what was taught (`resemble`, the best cosine).
+  baseline   frames labelled with the `empty` answer (the stream's ordinary state, where there is nothing to
+             answer) are the baseline: a frame's distance from them, in their own spreads, says how far it departs
+             from that state (`shown`), and what differs from them, compared with the same for every taught frame,
+             says how much the frame resembles what was taught (`resemble`, the best cosine).
   taught     a logistic regression on the labelled frames (standardised, classes weighted equally), refitted in the
              background. With a baseline, its weight is a sigmoid of the resemblance (half at `resemble`), and full
              when the frame is as close to the baseline as the baseline frames are to each other; without one, it
              grows with the labelled frames (half at `half_at`). Answers never taught keep their zero-shot share of
              what the student leaves.
   state      "quiet" when the best answer is a quiet one (never named), "sure" when it's at least `sure` likely,
-             else "unsure" if something is being shown (or there's no baseline to tell) and "quiet" if not.
+             else "unsure" if the frame departs from the baseline (or there's no baseline to tell) and "quiet" if
+             not. A quiet answer is one a caller doesn't act on: the `empty` answer, and any others in `quiet`.
+
+How an answer graduates (as the proxy's questions do, but per answer, since answers grow while it runs):
+  checks     a sure answer is checked when the truth for the same frame arrives: a teacher's sure look (a Watcher's)
+             or a label someone gives (`teach`). An answer counts at most one check per `gap` seconds, since
+             neighbouring frames are near copies, and keeps its newest `window`.
+  graduated  once it has `min_checks` checks and the 95% lower bound of their agreement is at least `target`.
+  demoted    while graduated, when the upper bound falls below `target`; it graduates again when the lower bound
+             recovers.
+  audits     a Watcher looks at a graduated answer at random moments, on average every `audit_every` seconds, so its
+             checks sample the stream rather than moments it chose; an answer that hasn't graduated it looks at
+             whenever it can.
+  Without a teacher, only the labels someone gives check the answers, so graduation is slow and rare; the answers
+  are the same either way, and `graduated` is for the caller to act on (before acting on an answer without asking,
+  say).
 """
 
 from __future__ import annotations
 
 import json
+import random
 import struct
 import threading
 import time
@@ -48,7 +64,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .proxy import encoder_text
+from .proxy import encoder_text, wilson
 
 ELSE = "something else"  # a teacher's answer for a frame that shows none of the answers
 
@@ -115,14 +131,19 @@ class _Fit:
 class Choice:
     """Picks one answer from text prompts and labelled frames; see the module's docstring for how.
 
-    `answers` maps each answer to its prompts. `quiet` answers are never named and never asked about; `empty` is the
-    one whose frames are the baseline. `new(name)` gives prompts for a name taught that isn't an answer yet (without
+    `answers` maps each answer to its prompts. `quiet` answers are never "sure" or "unsure", so a caller doesn't act
+    on them; `empty` is the one whose frames are the baseline. `new(name)` gives prompts for a name taught that isn't an answer yet (without
     it, teaching an unknown name is an error)."""
 
     def __init__(self, eyes: Eyes, answers: dict[str, list[str]], *, quiet=(), empty: str | None = None,
                  new: Callable[[str], list[str]] | None = None, temperature: float = 2.5, sure: float = 0.5,
-                 shown: float = 3.0, resemble: float = 0.6, resemble_scale: float = 0.05, half_at: int = 8):
+                 shown: float = 3.0, resemble: float = 0.6, resemble_scale: float = 0.05, half_at: int = 8,
+                 target: float = 0.9, min_checks: int = 20, window: int = 100, gap: float = 1.0):
         self.eyes, self.quiet, self.empty, self.new = eyes, set(quiet), empty, new
+        self.target, self.min_checks, self.window, self.gap = target, min_checks, window, gap
+        self.checks: dict[str, deque[bool]] = {}
+        self.checked_at: dict[str, float] = {}
+        self.graduated: set[str] = set()
         self.temperature, self.sure, self.shown, self.half_at = temperature, sure, shown, half_at
         self.resemble, self.resemble_scale = resemble, resemble_scale
         self.names: list[str] = []
@@ -157,9 +178,11 @@ class Choice:
                 self._add(name, prompts)
             return found or name
 
-    def teach(self, x: np.ndarray, name: str, by: str = "you") -> str:
+    def teach(self, x: np.ndarray, name: str, by: str = "you", check: bool = True) -> str:
         """Labels frame `x` with `name` (added as an answer, with `new(name)`'s prompts, if it isn't one) and refits in
-        the background; returns the answer it was labelled with."""
+        the background; returns the answer it was labelled with. With `check`, the label also checks the answer
+        given for the frame before it."""
+        before = self.ask(x) if check else None
         with self.adding:
             found = self.find(name)
             if found is None:
@@ -169,7 +192,57 @@ class Choice:
                 found = name
             self.labelled.append((x, self.names.index(found), by))
         self.changed.set()
+        if before is not None:
+            self.check(before, found)
         return found
+
+    def check(self, answer: dict, truth: str | None) -> bool | None:
+        """Checks the answer `ask` gave for a frame against the truth for it (an answer, or None for none of them).
+        Returns whether they agreed, or None when the check doesn't count (the answer wasn't sure, or its last check
+        was under `gap` seconds ago)."""
+        if answer["state"] != "sure":
+            return None
+        name, now = answer["name"], time.time()
+        with self.adding:
+            if now - self.checked_at.get(name, 0.0) < self.gap:
+                return None
+            self.checked_at[name] = now
+            record = self.checks.setdefault(name, deque(maxlen=self.window))
+            record.append(truth == name)
+            low, high = wilson(sum(record), len(record))
+            if name in self.graduated:
+                if high < self.target:
+                    self.graduated.discard(name)
+            elif len(record) >= self.min_checks and low >= self.target:
+                self.graduated.add(name)
+            return record[-1]
+
+    def report(self) -> dict[str, dict]:
+        """Per checked answer, its `progress`."""
+        with self.adding:
+            names = list(self.checks)
+        return {name: self.progress(name) for name in names}
+
+    def progress(self, name: str) -> dict:
+        """An answer's way to graduating: its checks, their agreement and its 95% bounds, whether it has graduated,
+        `needed`, the agreeing checks it still needs (0 once graduated; None if it can't within a window), and
+        `done`, the share of the way there: checks / (checks + needed)."""
+        with self.adding:
+            record = deque(self.checks.get(name, ()), maxlen=self.window)
+            graduated = name in self.graduated
+        k, m = sum(record), len(record)
+        low, high = wilson(k, m)
+        needed = 0 if graduated else None
+        if not graduated:  # agreeing checks still to come, the oldest leaving the window as they arrive
+            ahead = deque(record, maxlen=self.window)
+            for more in range(self.window + self.min_checks + 1):
+                if len(ahead) >= self.min_checks and wilson(sum(ahead), len(ahead))[0] >= self.target:
+                    needed = more
+                    break
+                ahead.append(True)
+        done = 1.0 if graduated else 0.0 if needed is None else m / (m + needed)
+        return {"checks": m, "agree": k / m if m else None, "low": low, "high": high, "graduated": graduated,
+                "needed": needed, "done": done}
 
     def forget(self) -> None:
         """Back to the answers it started with: the labelled frames go, and so do the answers added since."""
@@ -177,6 +250,7 @@ class Choice:
             self.generation += 1
             self.labelled, self.fit = [], None
             self.names, self.prompts = self.names[:self.start], self.prompts[:self.start]
+            self.checks, self.checked_at, self.graduated = {}, {}, set()
         self.changed.set()
 
     def counts(self) -> dict[str, dict[str, int]]:
@@ -220,8 +294,8 @@ class Choice:
                 self.fit = fit
 
     def ask(self, x: np.ndarray) -> dict:
-        """The answer for frame `x`: {"name", "p", "state", "probs", "zero", "shown", "resemble", "weight", "ready",
-        "mode"}. `probs` and `zero` give every answer's probability, with and without the student."""
+        """The answer for frame `x`: {"name", "p", "state", "graduated", "probs", "zero", "shown", "resemble", "weight",
+        "ready", "mode"}. `probs` and `zero` give every answer's probability, with and without the student."""
         names, prompts, fit, k = self.names, self.prompts, self.fit, len(self.labelled)
         n = min(len(names), len(prompts))
         student = fit.student if fit is not None else None
@@ -240,7 +314,7 @@ class Choice:
             taught[student.classes_] = student.predict_proba(x[None])[0]
             if baseline is None:
                 w = k / (k + self.half_at)
-            else:  # as far as the frame looks like the things it was taught, or like the baseline
+            else:  # as far as the frame looks like the frames it was taught, or like the baseline
                 w = sigmoid((resemble - self.resemble) / self.resemble_scale) if fit.residuals is not None else 0.0
                 w = max(w, sigmoid(2 * (self.shown - shown)))
             p = (1 - w) * zero + w * taught
@@ -249,7 +323,7 @@ class Choice:
             state = "quiet"
         elif p[best] >= self.sure:
             state = "sure"
-        else:  # no answer stands out: worth asking about only if something is being shown
+        else:  # no answer stands out: worth asking about only if the frame departs from the baseline
             state = "unsure" if shown is None or shown >= self.shown else "quiet"
         if student is not None:
             mode = f"taught: {k} labelled frames, student weight {w:.0%}"
@@ -257,7 +331,7 @@ class Choice:
             mode = f"zero-shot until two answers have frames ({k} labelled)"
         else:
             mode = "zero-shot: text prompts only"
-        return {"name": names[best], "p": float(p[best]), "state": state,
+        return {"name": names[best], "p": float(p[best]), "state": state, "graduated": names[best] in self.graduated,
                 "probs": dict(zip(names, p.tolist())), "zero": dict(zip(names, zero.tolist())),
                 "shown": shown, "resemble": resemble, "weight": w, "ready": baseline is not None, "mode": mode}
 
@@ -312,48 +386,66 @@ class Detector:
 
 class Watcher:
     """A teacher model watching the stream for a Choice. `teacher(frame, names)` answers which of `names` (or `ELSE`)
-    the frame (an image's bytes or a text) shows, as {answer: probability}; it's called one look at a time, from the Watcher's own thread.
+    the frame (an image's bytes or a text) shows, as {answer: probability}; it's called one look at a time, from the
+    Watcher's own thread.
 
-    It looks at the newest frame when the student's answer is a thing it hasn't agreed on in the last `confirmed`
-    seconds, or, when the answer is quiet, every `idle` seconds while something is being shown (a held thing can read
-    as a bare hand), resting `rest` seconds between looks. Sure of an answer (`sure`), it labels the frame for the
-    student, up to `cap` frames per answer, and calls `on_label(frame, x, name)`."""
+    It looks at the newest frame when the student's answer is a graduated one and its random audit is due (on average
+    every `audit_every` seconds), whenever it's one that hasn't graduated (or is unsure), or, when the answer is
+    quiet, every `idle` seconds while the frame departs from the baseline (a quiet answer can be the wrong one),
+    resting `rest` seconds between looks. Sure (`sure`), it labels the frame for the student, up to `cap` frames per answer, calling
+    `on_label(frame, x, name)`, and checks the student's answer (`Choice.check`) if it was steady: the same sure
+    answer for the last `steady` frames offered. Around a change in the stream, the student's answer flickers for a
+    frame or two on frames that show little of either side; a caller acting on answers waits for a steady one, and so
+    do the checks."""
 
     def __init__(self, choice: Choice, teacher: Callable[[Frame, list[str]], dict[str, float]], *, by: str = "teacher",
-                 sure: float = 0.5, cap: int = 60, rest: float = 0.3, confirmed: float = 3.0, idle: float = 3.0,
-                 fresh: float = 1.5, on_label: Callable[[Frame, np.ndarray, str], None] | None = None):
+                 sure: float = 0.5, cap: int = 60, rest: float = 0.3, idle: float = 3.0,
+                 fresh: float = 1.5, audit_every: float = 10.0, steady: int = 3,
+                 on_label: Callable[[Frame, np.ndarray, str], None] | None = None):
         self.choice, self.teacher, self.by, self.on_label = choice, teacher, by, on_label
-        self.sure, self.cap, self.rest, self.confirmed, self.idle, self.fresh = sure, cap, rest, confirmed, idle, fresh
+        self.sure, self.cap, self.rest, self.idle, self.fresh = sure, cap, rest, idle, fresh
+        self.audit_every, self.steady = audit_every, steady
+        self.streak = (None, 0)  # the sure answer of the frames offered last, and for how many in a row
+        self.audit_at: dict[str, float] = {}  # graduated answer: when its next audit is due
         self.newest = None
         self.wake = threading.Event()
         self.last = None
         self.agree: deque[bool] = deque(maxlen=50)
-        self.agreed: dict[str, float] = {}  # answer: when the teacher last agreed with the student on it
         self.looked: deque[float] = deque(maxlen=200)
         threading.Thread(target=self._watching, daemon=True).start()
 
     def look(self, frame: Frame, x: np.ndarray, answer: dict) -> None:
         """Offers the newest frame and the student's answer for it; the teacher looks if that's worth it."""
-        now = time.time()
+        now, name = time.time(), answer["name"]
+        if answer["state"] == "sure":
+            self.streak = (name, self.streak[1] + 1 if self.streak[0] == name else 1)
+        else:
+            self.streak = (None, 0)
+        steady = self.streak[1] >= self.steady
         if answer["state"] == "quiet":
             since = now - self.looked[-1] if self.looked else self.idle
             worth = (answer["shown"] or 0) >= self.choice.shown and since >= self.idle
+        elif answer.get("graduated"):
+            worth = now >= self.audit_at.get(name, 0.0)
+            if worth:
+                self.audit_at[name] = now + random.expovariate(1 / self.audit_every)
         else:
-            worth = now - self.agreed.get(answer["name"], 0) > self.confirmed
+            worth = True
         if worth:
-            self.newest = (frame, x)
+            self.newest = (frame, x, answer, steady)
             self.wake.set()
 
     def forget(self) -> None:
         self.agree.clear()
-        self.agreed.clear()
+        self.audit_at.clear()
+        self.streak = (None, 0)
         self.last = None
 
     def _watching(self):
         while True:
             self.wake.wait()
             self.wake.clear()
-            frame, x = self.newest
+            frame, x, answer, steady = self.newest
             self.looked.append(time.time())
             t0 = time.perf_counter()
             out = self.teacher(frame, list(self.choice.names))
@@ -362,13 +454,13 @@ class Watcher:
             p = out[best]
             name = self.choice.find(best) if best != ELSE else None
             self.last = {"name": name or best, "known": name is not None, "p": p, "ms": ms, "at": time.time()}
+            if p >= self.sure and steady:
+                agreed = self.choice.check(answer, name)
+                if agreed is not None:
+                    self.agree.append(agreed)
             if p >= self.sure and name is not None:
-                agreed = self.choice.ask(x)["name"] == name
-                self.agree.append(agreed)
-                if agreed:
-                    self.agreed[name] = time.time()
                 if self.choice.counts().get(name, {}).get(self.by, 0) < self.cap:
-                    self.choice.teach(x, name, by=self.by)
+                    self.choice.teach(x, name, by=self.by, check=False)
                     if self.on_label is not None:
                         self.on_label(frame, x, name)
             time.sleep(self.rest)
@@ -387,7 +479,8 @@ class Watcher:
         return {"name": last["name"], "known": last["known"], "p": round(last["p"], 3), "ms": round(last["ms"]),
                 "age": round(now - last["at"], 2), "fresh": now - last["at"] < self.fresh,
                 "per_minute": sum(1 for t in self.looked if now - t < 60),
-                "agree": round(float(np.mean(self.agree)), 3) if self.agree else None, "checked": len(self.agree)}
+                "agree": round(float(np.mean(self.agree)), 3) if self.agree else None, "checked": len(self.agree),
+                "graduated": sorted(self.choice.graduated)}
 
 
 class Album:
