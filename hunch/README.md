@@ -1,7 +1,8 @@
 # hunch
 
-hunch is a proxy: it sits in front of a /v1/systemone model you already use to answer questions about textual data, such as 
-"did this tool call fail in this agent trace?". It learns to answer the easy ones itself, but way faster.
+hunch is a proxy: it sits in front of a /v1/systemone model you might already be using to answer questions about textual data (like
+"did this tool call fail in this agent trace?", "is this log entry from a hacker?"). It learns to answer the easy questions itself, but way faster,
+making your whole system more responsive (and sometimes smarter too!).
 
 - **The teacher** either an LLM judge or a dedicated decision model. This is what hunch learns from.
 - **The student** is hunch's own classifier model, one per question: Once cross-validation on the teacher's answers
