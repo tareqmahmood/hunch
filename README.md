@@ -67,12 +67,14 @@ hunch trains the student on the teacher's judgements and then takes over once it
 
 ## Why
 
-One _very_ useful area for decision models is agent trace analysis. Agent loops generate hundreds of lines of prose,
-code, tool calls, and it's useful to analyze all of these traces for correctness, failure modes, safety or other
-metrics in as real-time a way as possible.
+(... and why we build it!)
 
-Agent systems ask the same small questions over and over, on every step of every trace. The usual answer is an LLM
-or decision model judge: hundreds of milliseconds and a model call per question.
+One _very_ useful area for decision models is agent trace analysis. Agent loops generate hundreds of lines of prose,
+code, tool calls. We need to analyze all of these traces, in real-time, for correctness, failure modes, safety or other
+metrics.
+
+These feedback systems ask the same small questions over and over, on every single streaming record. The usual answer is an LLM
+or decision model judge: hundreds of milliseconds in the best case, and a model call (which adds up when you bring in smarter models) per question.
 
 _Most_ of those questions are easy _most_ of the time. hunch sits in front of your judge (its teacher) and learns from its answers. hunch
 only starts answering only once cross-validation shows it agrees with the teacher often enough. It's continually audited
