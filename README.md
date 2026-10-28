@@ -132,8 +132,8 @@ uv run --package hunch pytest -q hunch/tests
 ## Licence
 
 hunch, eg2cpu and the examples are licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
-your option. Unless you say otherwise, any contribution you submit for inclusion is licensed the same way.
+your option.
 
-That covers this repository's code and data files. The examples ship hashes and labels, not dataset text; the
-datasets they download, listed in [examples/README.md](examples/README.md), keep their own licences. The EmbeddingGemma
-2 checkpoint is Apache-2.0 and is downloaded, not included.
+The examples ship hashes and labels for datasets. Datasets are under various licenses, listed in [examples/README.md](examples/README.md).
+
+The EmbeddingGemma 2 checkpoint is Apache-2.0 (not included).
