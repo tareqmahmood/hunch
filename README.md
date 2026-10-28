@@ -83,10 +83,9 @@ You keep your judge in the loop, but you call it less!
 
 - **Cheaper and faster.** On 2,000 real coding-agent tool results, hunch's students answered 69–75% of requests
   with no judge call over the last 500.
-- **Sometimes better than a tuned judge, often not.** Given 200 labelled examples, EG2 beats the judge with its own
-  cut points tuned on the same labels on 2 of 9 test sets in the examples (tool failure, and prompt injection in
-  unseen tool formats), is level on 4 and behind on 3; combining the two beats the tuned judge on 1 and is level on 6.
-- **No GPU.** EmbeddingGemma 2 is run using a Rust engine for commodity CPUs.
+- **Meets or beats the teacher alone.** hunch tries to distill the teacher's answer to the question, but the combination
+  of hunch + teacher often beats a teacher or EG2 alone (this depends on the question - see caveats).
+- **No GPU.** EmbeddingGemma 2 is run using a highly-tuned Rust engine for commodity CPUs.
 
 ### Where it doesn't fit
 
