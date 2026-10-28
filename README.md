@@ -55,8 +55,7 @@ giant vector representing semantic concepts from that input.
 Before we tell you more about hunch, some useful things to know:
 
 - **Structured decisions:** a question with a fixed kind of answer: yes or no (`noul`), one of named options (`choice`), or
-  one of ordered levels (`score`). `noul` is the protocol's name for a yes/no question, answered as the probability
-  of yes.
+  one of ordered levels (`score`). If you're curious, `noul` is Jev's name for a yes/no question (from Ber`noul`li distribution), meaning "probability of yes".
 - **Teacher:** the model you would otherwise call for every question, such as a decision model (Clef, Jev, etc) or an LLM-as-judge (frontier model or otherwise).
 - **Student:** hunch's small classifier for one question, which reads an embedding of the state from EmbeddingGemma 2.
 - **State:** what you're asking the question about.
