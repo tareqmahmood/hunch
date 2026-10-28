@@ -81,8 +81,8 @@ of what it learned, it sends it to the teacher to help it tune itself.
 
 You keep your judge in the loop, but you call it less!
 
-- **Cheaper and faster.** On 2,000 real coding-agent tool results, hunch's students answered 69–75% of requests
-  with no judge call over the last 500.
+- **Cheaper and faster.** hunch can take a lot of the load off the more expensive judge. Depending on the
+  difficulty of the question, it might even be nearly 100%.
 - **Meets or beats the teacher alone.** hunch tries to distill the teacher's answer to the question, but the combination
   of hunch + teacher often beats a teacher or EG2 alone (this depends on the question - see caveats).
 - **No GPU.** EmbeddingGemma 2 is run using a highly-tuned Rust engine for commodity CPUs.
