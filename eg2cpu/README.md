@@ -48,7 +48,8 @@ An image goes through the same pipeline as `AutoProcessor` plus `EmbeddingGemma2
    embedding, plus the 24 layer means.
 
 Images and text share one embedding space. In the test fixtures, each of four photos is nearest to its own caption,
-at both 70 and 280 soft tokens: cosine 0.67-0.73, against 0.48-0.61 for the other captions.
+at both 70 and 280 soft tokens. The cosine is 0.67-0.73 for its own caption, against 0.48-0.61 for the other
+captions.
 
 The soft-token budget (70, 140, 280, 560 or 1120) sets the resolution, and the vision tower's cost grows with it.
 `embed_image` uses the processor's default of 280.
@@ -64,8 +65,8 @@ in the vision tower; without SME (`EG2_SME=off`) 248 ms and 1.2 s. The first ima
 
 ## Python
 
-The `python` cargo feature builds a PyO3 extension (via maturin) that needs only numpy, not torch or transformers.
-The forward pass releases the GIL.
+The `python` cargo feature builds a PyO3 extension (via maturin). The extension needs only numpy. It does not need
+torch or transformers. The forward pass releases the GIL.
 
 ```python
 import eg2cpu
@@ -89,12 +90,12 @@ of a full pass. A decision that reads layer ≤ k only needs the exit at k; the 
 
 ### Batching
 
-Embedding texts one at a time leaves most cores idle. `eg2cpu.Embedder` batches in the background: a worker thread
-embeds every text queued while the previous batch ran, all together, and concurrent requests for the same text share
-one forward pass. Results (24 layer means, then the embedding) are cached by text, and calls are thread-safe.
+Embedding texts one at a time leaves most cores idle. `eg2cpu.Embedder` batches in the background. A worker thread
+embeds together every text queued while the previous batch ran. Concurrent requests for the same text share one
+forward pass. Results (24 layer means, then the embedding) are cached by text. Calls are thread-safe.
 
-A plain `for` loop can't be batched, because each call waits for its result before the next one is made. Two ways
-to give the batcher work:
+If you call it from a plain `for` loop, nothing is batched. Each call waits for its answer before the next call
+starts. To give the batcher work, do one of these:
 
 ```python
 embed = eg2cpu.Embedder()                    # or Embedder(path=..., model=..., max_batch=256)
@@ -154,9 +155,9 @@ A decision spec (YAML) states a question about a span of a trace and the matched
 - a whitening matrix for the abstain check;
 - the escalation rule and prompt.
 
-Handles are applied in Rust. Each distinct unit text is encoded once, so applying 1 or 3 handles to the same
-spans costs one encoder pass per text; each handle adds a dot product per direction and, when it can abstain, a
-dim × dim whitening product (dim is the readout's width).
+Handles are applied in Rust. Each distinct unit text is encoded once. When you apply 1 or 3 handles to the same
+spans, the cost is one encoder pass for each text. Each handle adds a dot product for each direction. When a handle
+can abstain, it also adds a dim × dim whitening product (dim is the width of the readout).
 
 ```python
 import eg2cpu
@@ -202,18 +203,19 @@ and test them on real traces.
   intervals span about ±0.08 AUC, so picking the higher number mostly picks noise, and it would also inflate the
   numbers reported.
 
-  `auto` follows a fixed rule. It uses the default (`diff_of_means`) unless that misreads a hard negative and
-  the other method doesn't; failing that, it picks the method that misreads the fewest. The handle records the
-  chosen method, the requested one and the reason.
-- `readout.layer: auto` (optional `readout.layers`, default `final, 4, 8, 12, 16, 20, 23`) compiles every
-  candidate layer on a shared embedding cache. One forward pass yields all layers, so nothing is encoded twice. It
-  then picks by a fixed rule:
-  1. **Guard:** drop layers whose calibration interval lies wholly below the best layer's. The 60-item sample can
-     rule a bad layer out but can't choose between close ones.
-  2. **Rank:** order the rest by the `transfer` set's score when there is one, otherwise by grouped
-     cross-validation on the contrasts. Whole groups are held out: a contrast's optional `group` (for example
-     a document type or template), or else the contrast itself.
-  3. **Tie-break:** keep `final` if it's within one standard error of the best.
+  `auto` follows a fixed rule. It uses the default (`diff_of_means`), unless the default misreads a hard negative and
+the other method does not. In that case, it picks the method that misreads the fewest. The handle records the chosen
+method, the requested method and the reason.
+- `readout.layer: auto` (optional `readout.layers`, default `final, 4, 8, 12, 16, 20, 23`) compiles every candidate
+  layer on a shared embedding cache. One forward pass gives all layers, so nothing is encoded twice. It then picks a
+  layer by a fixed rule:
+  1. **Guard:** Drop the layers whose calibration interval lies wholly below the interval of the best layer. The
+     60-item sample can rule out a bad layer. It cannot choose between close layers.
+  2. **Rank:** Order the remaining layers by the score of the `transfer` set when there is one. Otherwise, order them
+     by grouped cross-validation on the contrasts. Whole groups are held out. A group is the optional `group` of a
+     contrast (for example a document type or template). If a contrast has no `group`, the contrast itself is the
+     group.
+  3. **Tie-break:** Keep `final` if it is within one standard error of the best.
 
   The report has the per-layer table (score, its standard error, calibration interval, CV and transfer
   metrics), the reason, and a note that the chosen score is selected, so it's optimistic. Every compile also

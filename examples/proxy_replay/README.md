@@ -1,8 +1,9 @@
 # proxy_replay: how much can the proxy take off the teacher?
 
-Replays hunch's routing policy over a stream of 2,000 real coding-agent tool results, each answered by the teacher on
-three questions, and measures how much the students could answer and how often they agree with the teacher. It is a
-standalone copy of the policy, so it can try variants quickly; `proxy_service` runs the proxy itself.
+This replays the routing policy of hunch over a stream of 2,000 real coding-agent tool results. The teacher answers
+each result on three questions. The replay measures how much the students can answer and how often they agree with
+the teacher. It is a standalone copy of the policy, so it can try variants quickly. `proxy_service` runs the proxy
+itself.
 
 From `examples/`:
 
@@ -32,8 +33,8 @@ minutes, plus 3 for `tool_call_failed`.
 
 ## Findings
 
-The numbers are agreement with the teacher (Clef), not accuracy. Each refit standardizes the features with its own
-training items' statistics, so the replay uses nothing about items it hasn't reached.
+The numbers are agreement with the teacher (Clef), not accuracy. Each refit standardizes the features with the
+statistics of its own training items. So the replay uses nothing about items it has not reached.
 
 - `output_kind` graduates at item 149. On its own requests the student answers 92% of the second half locally, with
   kappa 0.94 against the teacher (agreement 0.958, where always giving the most common answer scores 0.350).
@@ -44,5 +45,5 @@ training items' statistics, so the replay uses nothing about items it hasn't rea
   "no", so their agreement (0.994) equals the always-"no" baseline; 4 of the teacher's 61 "failed" answers in the
   second half were answered "no" locally.
 
-`proxy_service` reports different local shares on the same stream: it sends one request per question, so a question
-that never graduates doesn't hold the others back, and it answers repeated states from the store.
+`proxy_service` reports different local shares on the same stream. It sends one request per question. A question that
+never graduates does not hold the others back. It also answers repeated states from the store.

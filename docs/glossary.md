@@ -1,7 +1,7 @@
 # Glossary: methods and maths
 
-A quick reference for the terms used across eg2cpu and hunch: compiled decisions, the proxy, and the examples. Each entry
-says what the term is, gives the formula where one helps, and points at the code.
+This is a quick reference for the terms used in eg2cpu and hunch: compiled decisions, the proxy, and the examples.
+Each entry says what the term is. Where a formula helps, the entry gives it. Each entry also points to the code.
 
 Sections: [encoder and features](#encoder-and-features), [decision kinds](#decision-kinds),
 [directions](#directions-readout-methods), [calibration](#calibration), [abstain and escalate](#abstain-and-escalate),
@@ -57,21 +57,21 @@ calibrate, abstain and escalate. Compiling it gives a handle, a small safetensor
 
 **boolean.** Yes or no. The calibrated output is `p = P(yes)`.
 
-**choice.** One of *k* unordered options. One direction per option, and a probability per option.
+**choice.** One of *k* unordered options. Each option has one direction and one probability.
 
 **score.** In eg2cpu decisions, a continuous value, e.g. 0–1: one direction, then a linear map. In hunch, a `score`
 question is one of ordered levels, like eg2cpu's `levels`.
 
-**levels.** *k* ordered levels. One direction, proportional-odds probabilities per level, and an
-expected level as the score.
+**levels.** *k* ordered levels. There is one direction. Each level has a proportional-odds probability. The score is
+the expected level.
 
 ## Directions (readout methods)
 
 **Contrast.** Texts that differ only in the property being decided: a yes/no pair, one text per option, or one per
 level. The difference between them isolates the property from the topic.
 
-**Matched set.** One contrast's texts, all sharing the same template and context. Levels and score contrasts are
-centred per set, so only the grading within a set is left.
+**Matched set.** The texts of one contrast. They all share the same template and context. For levels and score
+contrasts, each set is centred. Only the grading of its texts against each other remains.
 
 **Hard negative.** A text that looks like "yes" but is "no", e.g. "Payment declined by the card issuer" for "did the
 tool call fail?". It anchors the readout against topic leakage.
@@ -91,11 +91,11 @@ down-weights directions that vary a lot within a class.
 
 ## Calibration
 
-**Calibration sample.** About 60 labelled rows from the target domain. It is required, because rankings transfer
-from contrasts but cut-offs don't.
+**Calibration sample.** About 60 labelled rows from the target domain. It is required. Rankings transfer from
+contrasts, but cut-offs do not.
 
-**Standardized score.** `z = (s − mean_cal) / std_cal`, taken over the calibration sample, so every calibrator
-works on a unit-free scale.
+**Standardized score.** `z = (s − mean_cal) / std_cal`. It is taken over the calibration sample. Because of this,
+every calibrator works on a unit-free scale.
 
 **Platt scaling** (boolean). `p = σ(a·z + b)`, fitted by Newton's method on the log-loss with a tiny L2 penalty on
 `a`. `fit_logistic`.
@@ -122,12 +122,13 @@ same calibration rows, so its probability is on the same footing as the readout'
 **Mahalanobis distance.** `d(x) = ‖L(x − μ)‖ = √((x − μ)ᵀΣ⁻¹(x − μ))`, the distance from the compile-time reference
 set (contrasts plus calibration rows). It is computed in Rust at apply time.
 
-**Held-out distances.** Each reference row's distance under a mean and covariance fitted without its group (grouped
-5-fold). In-sample distances are far too small in high dimensions, which would make every new span look out of
+**Held-out distances.** The distance of each reference row, under a mean and covariance fitted without its group
+(grouped 5-fold). In-sample distances are far too small in high dimensions. They make every new span look out of
 distribution. `heldout_distances`.
 
-**Abstain threshold.** The 99th percentile (`mahalanobis_quantile`) of held-out distances. It is taken over the
-calibration rows when there are any. Beyond it, the verdict is `abstain`.
+**Abstain threshold.** The 99th percentile (`mahalanobis_quantile`) of held-out distances. When calibration rows
+exist, the percentile is taken over the calibration rows. When a distance is beyond the threshold, the verdict is
+`abstain`.
 
 **Escalate band.** `|p − c| < w` (boolean) or `|value − c| < w` (score and levels): an uncertain answer is sent to
 an LLM with a rendered prompt.
@@ -138,8 +139,8 @@ an LLM with a rendered prompt.
 
 ## Automatic choices (fixed rules)
 
-**Grouped k-fold.** Cross-validation where whole groups (a contrast set, a document type, a tool, a session) are
-held out together, so a fold never sees a near-copy of its test rows.
+**Grouped k-fold.** Cross-validation where whole groups are held out together. A group is a contrast set, a document
+type, a tool, or a session. A fold never sees a near-copy of its test rows.
 
 **Contrast CV.** Grouped 5-fold over the contrasts: refit the direction without each fold and score the held-out
 rows. The score is AUC (boolean), accuracy (choice), Spearman (levels) or correlation (score). `contrast_cv`.
@@ -221,8 +222,9 @@ model). The CLI calls it `--backend`; answers it gives say `"answered_by": "back
 `choice` and `score` `{"type": ..., "probabilities": {option: p}}` (score options are level indices). hunch adds
 `choice`/`score`, `confidence` and `answered_by`. `answer_object`, `parse_answer`.
 
-**Graduation.** A question's student starts answering once cross-validation on its examples passes one of two bars,
-symmetric or one-sided (below). It is decided again at every refit.
+**Graduation.** Graduation is the point where the student of a question starts to answer. It happens when
+cross-validation on the examples of the question clears one of two bars. The bars are symmetric or one-sided (see
+below). The system checks again at every refit.
 
 **Question key (version).** A hash of a question's type, instructions and criteria. Rewording a question makes a
 new version, with its own sampled answers and graduation. `question_key`.
@@ -242,12 +244,13 @@ version in its family.
 sits in a rotating window per question version (default 2,000) and is weighted by the teacher's confidence. A
 question keeps one example per state: a new answer for a state replaces the old one.
 
-**Stored answer.** A request whose state already has an answer in the store for every question (a label, or the
-teacher's last answer) is answered from the store: `"answered_by": "cache"`.
+**Stored answer.** If the store has an answer for every question in the state of a request (a label, or the teacher's
+last answer), the store answers the request: `"answered_by": "cache"`.
 
-**Refit.** Retraining a student and re-deciding graduation: on a worker thread once a question has 100 new examples,
-a count checked when the teacher answers, and on each `train` call with `"refit": true` (the default). One
-question's refits run one at a time. The new fit is kept in the store, so a restarted proxy starts from it.
+**Refit.** A refit retrains a student and decides graduation again. A refit runs on a worker thread when a question
+has 100 new examples. The teacher checks this count when it answers. A refit also runs on each `train` call with
+`"refit": true` (the default). The refits of one question run one at a time. The store keeps the new fit, so a
+restarted proxy starts from it.
 
 **Out-of-fold predictions.** 5-fold cross-validated predictions on a student's own examples. Graduation thresholds
 are chosen on them.
@@ -274,13 +277,13 @@ than the 5th percentile of those examples' own nearest-neighbour similarities. N
 locally answered requests are audited in the background (the client gets the student's answer at once), and every
 request forwarded for another reason audits each student that would have answered it.
 
-**Demotion.** Over a question's last 100 audits (at least 20), a symmetric question is demoted while the Wilson upper
-bound on agreement is below 0.90; a one-sided one while the Wilson lower bound on its miss rate (local "no" answers
-the teacher calls "yes") is above 2%. A demoted question forwards its requests, which keep auditing it, and answers
-again once its audits recover.
+**Demotion.** Consider a question's last 100 audits (at least 20). A symmetric question is demoted while the Wilson
+upper bound on agreement is below 0.90. A one-sided question is demoted while the Wilson lower bound on its miss rate
+is above 2%. The miss rate is the share of local "no" answers that the teacher calls "yes". A demoted question
+forwards its requests. These requests keep auditing the question. The question answers again when its audits recover.
 
-**Request-level routing.** A request is answered locally only if every question in it may be. Otherwise the whole
-request goes upstream, because the teacher reads the state once.
+**Request-level routing.** The proxy answers a request locally only if it may answer every question in the request
+locally. Otherwise, the whole request goes upstream. The reason is that the teacher reads the state once.
 
 **Warm start.** Starting a student from a compiled handle's direction instead of from scratch.
 
@@ -290,8 +293,8 @@ request goes upstream, because the teacher reads the state once.
 (`AnswerCache`), and replayed as a backend (`OfflineBackend`). The examples ship the teacher's answers this way,
 one file per example.
 
-**Teacher blind spot (rule 9).** A student distilled from a teacher copies its misses. Check the teacher against
-ground truth before distilling it, and give labelled cases where it's wrong.
+**Teacher blind spot (rule 9).** A student distilled from a teacher copies the misses of the teacher. Before you
+distill a teacher, check it against ground truth. Give labelled cases where the teacher is wrong.
 
 ## Pre-flight check
 

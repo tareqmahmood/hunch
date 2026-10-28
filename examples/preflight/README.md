@@ -18,8 +18,8 @@ Input, one JSON object per line:
 {"span": {"call": "...", "output": "..."}, "answer": [0.93], "group": "session-1"}
 ```
 
-`answer` is the teacher's probabilities (one per option; for yes/no `[p_yes]` or a number) or a label. `group`
-keeps one session's units in the same cross-validation fold.
+`answer` is the teacher's probabilities or a label. The probabilities are one per option. For yes/no, use `[p_yes]`
+or a number. `group` keeps the units of one session in the same cross-validation fold.
 
 ## What it does
 
@@ -29,8 +29,9 @@ cross-validated against the teacher with the proxy's graduation rules:
 - **one-sided** (yes/no): only a confident "no" is answered locally;
 - **levels** (score): Spearman, QWK, within-one, and whether held-out level means are in order.
 
-It also reports the teacher's own uncertainty, units over the 1,024-token window, optional hard negatives, and the
-expected coverage and compute per item at the best readout.
+It also tells you how unsure the teacher itself was. It tells you which units are longer than the 1,024-token window.
+It tells you how it did on any hard negatives you gave it. It also tells you how much coverage and compute per item
+to expect at the best readout.
 
 ## Findings
 

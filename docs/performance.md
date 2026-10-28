@@ -49,8 +49,8 @@ count (`hw.perflevel0.physicalcpu`, 6 here) with floors of 8 and 12 threads: `40
 | 256 texts × 32 tokens | 3,820–4,080 tokens/s | 3,580–4,180 tokens/s |
 | 256 texts × 128 tokens | 3,120–4,150 tokens/s | 3,820–4,480 tokens/s |
 
-Texts of 48 and 64 tokens run 2–6% faster on 12 threads than on 8. 8 threads suit texts up to 40 tokens even with
-only 6 P-cores: with 4, a 32-token text takes twice as long as a 16-token one.
+Texts of 48 and 64 tokens run 2–6% faster on 12 threads than on 8 threads. 8 threads suit texts of up to 40 tokens,
+even with only 6 P-cores. With 4 threads, a 32-token text takes twice as long as a 16-token text.
 
 **`EG2_BF16=bfmmla`** (Arm `BFMMLA`) applies only with `EG2_SME=off` here, since SME takes the matmuls when present.
 The M5 Pro reports `bf16`, but a P-core issues 2.1 G `BFMMLA`/s (68 GFLOP/s), half its fp32 `FMLA` rate, so the bf16
@@ -158,7 +158,7 @@ came out the same.
 bound by loading weight tiles from L2, at about 500 GFLOP/s per core. `EG2_BF16=dot` (AVX-512 BF16 dot products) is
 slower than fp32 here, because it issues on one port where fp32 FMAs issue on two.
 
-**Decisions per second**, Rust callers each sending one unit at a time, full pass, AMX:
+**Decisions per second**, with Rust callers that each send one unit at a time, full pass, AMX:
 
 | callers | 32-token units | 128-token units |
 |---|---|---|
@@ -200,8 +200,8 @@ Two modes: fp32 math on bf16 weights (the default), and `EG2_BF16=bfmmla`, which
 | matmul, one core | 53–56 GFLOP/s | 199–224 GFLOP/s | ~4× |
 | matmul, 16 cores | 610–730 GFLOP/s | 1,240–2,310 GFLOP/s | |
 
-The fp32 kernel runs at about 62% of the core's fp32 peak; `BFMMLA` gives four times its rate per core. Short texts
-get 8 threads up to 40 tokens and all 16 above, from the core count.
+The fp32 kernel runs at about 62% of the fp32 peak of the core. `BFMMLA` gives four times that rate per core. Short
+texts use 8 threads up to 40 tokens and all 16 threads above 40 tokens. The thread count comes from the core count.
 
 **Early exit**, ms per text:
 

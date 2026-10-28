@@ -31,7 +31,7 @@ and `failure_severity` read. **Time:** about 3 minutes.
 | layer 4, diff of means | 0.891 | 0.797 | 0.888 | 23% | 82% |
 | final layer, diff of means | 0.899 | 0.838 | 0.902 | 30% | 1% |
 
-The spec's readout separates failures well on real traces, but only the layer-4 readout recognises support-bot
+The readout of the spec separates failures well on real traces. But only the layer-4 readout recognises support-bot
 outputs as out of domain.
 
 Against the harness flag, on the 580 results (95% bootstrap intervals; differences are paired, on the same resampled

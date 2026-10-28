@@ -1,6 +1,6 @@
 # proxy_early_exit: which layers do the students need?
 
-Which encoder layers do the proxy's students need, and can easy items stop at an early layer?
+Which encoder layers do the students of the proxy need? Can easy items stop at an early layer?
 
 From `examples/`:
 

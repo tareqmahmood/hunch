@@ -74,9 +74,9 @@ a test run that never ran, a GitHub fetch that returned only an error page):
 | EG2 + 200 labels | 0.928 | 0.70 | 0.53 | 23% | 38% | 0.44 |
 | teacher + EG2, combined on 200 labels | 0.937 | 0.77 | 0.54 | 32% | 62% | 0.62 |
 
-On QWK the flag, the calibrated teacher, the labelled student and the combination are all within each other's
-intervals (combined − flag: +0.046 [−0.024, +0.108]). On macro-F1 the labelled student beats the calibrated teacher
-(+0.080 [+0.045, +0.143]) and the flag (+0.108 [+0.068, +0.185]). Silent failures are where the zero-shot teacher is
-strongest: it catches 18 of the 24, at the cost of flagging many results that are fine; the uncalibrated spec decision
-catches 17, at precision 0.14. Calibrating on stream labels, where problems are rare, makes every model more
-conservative. 24 failures is a small sample, so read those columns as a direction, not a measurement.
+On QWK, the flag, the calibrated teacher, the labelled student and the combination are all within the intervals of
+each other (combined − flag: +0.046 [−0.024, +0.108]). On macro-F1, the labelled student beats the calibrated teacher
+(+0.080 [+0.045, +0.143]) and the flag (+0.108 [+0.068, +0.185]). The zero-shot teacher is strongest on silent
+failures. It catches 18 of the 24. It also flags many results that are fine. The uncalibrated spec decision catches
+17, at precision 0.14. Problems are rare in stream labels. Calibrating on stream labels makes every model more
+conservative. 24 failures is a small sample. Read those columns as a direction, not as a measurement.

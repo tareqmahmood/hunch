@@ -33,4 +33,4 @@ about 6 minutes.
 - PII: auto picks the final layer every time, with or without groups and with the gretel transfer set. On gretel's
   unseen document types that is the best layer (0.884).
 
-The teacher (Clef) is scored on the same units, for reference: AUC 0.962 on tool failure and 0.971 on gretel.
+The teacher (Clef) is scored on the same units for reference. The AUC is 0.962 on tool failure and 0.971 on gretel.

@@ -35,5 +35,5 @@ uv run failure_severity_hybrid/failure_severity_hybrid.py
 | teacher hybrid: flag + teacher graded | 0.902 | 0.864 |
 | cascade: EG2 hybrid, the teacher where it passes up | 0.909 | 0.881 |
 
-The flag alone scores at least as well as the hybrid: almost all of the hybrid's quality comes from the harness flag,
-and the graded step adds nothing measurable on top.
+The flag alone scores at least as well as the hybrid. Almost all of the quality of the hybrid comes from the harness
+flag. The graded step adds nothing measurable.

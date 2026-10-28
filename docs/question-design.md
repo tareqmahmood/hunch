@@ -95,15 +95,16 @@ uv run preflight/preflight.py answers.jsonl --type score --options none,minor,re
 {"span": {"call": "...", "output": "..."}, "answer": [0.03], "group": "<session id>"}
 ```
 
-- `answer` is the teacher's probabilities (one per option; for `noul`, `[p_yes]`) or a label.
-- `group` keeps a session's units in the same cross-validation fold, as hunch would meet them.
+- `answer` is the teacher's probabilities or a label. Each option has one probability. For `noul`, the probabilities
+  are `[p_yes]`.
+- `group` keeps the units of a session in the same cross-validation fold, as hunch meets them.
 - `--hard hard.jsonl` adds units that must read a given answer.
 
-**What it does.** For layers 4, 8 and 12 and the final embedding, it cross-validates a student against the teacher
-with hunch's graduation rules ([glossary](glossary.md#the-proxy-hunch)), and costs each layer at its measured encoding
-time on your units. For `score` questions it also checks Spearman correlation, QWK, how often the answer is within
-one level, and whether the levels come out in order. It reports how unsure the teacher is and how many units exceed
-the 1,024-token window, and ends with one verdict:
+**What it does.** It cross-validates a student against the teacher for layers 4, 8 and 12 and the final embedding. It
+uses the graduation rules of hunch ([glossary](glossary.md#the-proxy-hunch)). It costs each layer at its measured
+encoding time on your units. For `score` questions, it also checks Spearman correlation, QWK, how often the answer is
+within one level, and whether the levels come out in order. It reports how unsure the teacher is. It reports how many
+units exceed the 1,024-token window. It ends with one verdict:
 
 | verdict | meaning | what to do |
 |---|---|---|
@@ -113,7 +114,7 @@ the 1,024-token window, and ends with one verdict:
 | **BACKEND ONLY** | no layer passes | rephrase (rules 1–5 and 7, with the printed hints), or keep the question on the teacher |
 
 **Does it predict the replay?** On the first 300 units of the shipped stream, the check gave the same verdicts as the
-full 2,000-unit replays. Costs are estimated compute per unit, against the teacher's 494 ms:
+full 2,000-unit replays. Costs are estimated compute per unit, compared with the teacher's 494 ms:
 
 | question | pre-flight on 300 units | replay on 2,000 |
 |---|---|---|
@@ -121,7 +122,7 @@ full 2,000-unit replays. Costs are estimated compute per unit, against the teach
 | tool_failed | not enough data: 16 "yes" answers where about 33 are needed (CV AUC 0.79) | graduated one-sided at unit 549 (lost it at 701, back at 1001) |
 | severity | backend only: rare levels missed, levels out of order, teacher unsure on 35% | never graduated |
 
-For `tool_failed` the check asked for about 320 more units; at 650 units it asked for about 90 more.
+For `tool_failed`, the check asked for about 320 more units. At 650 units, it asked for about 90 more units.
 
 **Prompt injection** (`injection_teacher`, 700 units grouped by tool): on the teacher's answers the question
 graduates at layer 8 (kappa 0.87), and on the ground truth at layer 4 (kappa 0.89). Only the check against ground

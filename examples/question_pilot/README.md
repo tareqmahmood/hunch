@@ -3,11 +3,12 @@
 Script: [question_pilot.py](question_pilot.py). Recorded run: [recorded/](recorded/). The teacher's answers to every
 question version, from Clef: [teacher.jsonl](teacher.jsonl) (hashed, so the whole pilot replays offline).
 
-**Question.** Where EG2 is right and the teacher is wrong against ground truth, can those cases tell us how to reword
-the teacher's question, so the teacher itself gets better? The recorded pilot covers prompt injection, where the two
-models fail differently. The script also has a PII task on gretel windows, with no recorded run.
+**Question.** Consider the cases where EG2 is right and the teacher is wrong against ground truth. Can those cases
+tell us how to reword the teacher's question, so that the teacher itself gets better? The recorded pilot covers
+prompt injection, where the two models fail differently. The script also has a PII task on gretel windows. This task
+has no recorded run.
 
-**Answer.** Yes, by a small margin on a small test. One rewritten question, chosen on dev, scored on held-out test
+**Answer.** Yes, by a small margin on a small test. One rewritten question, chosen on dev, is scored on held-out test
 units:
 
 | task | test units | teacher (Clef), original question | rewritten question | gain (95% interval) |
@@ -19,8 +20,8 @@ The test holds only units whose tool, attack text and filler string were all abs
   leaves 15 polite and 12 enhanced injections, 95 benign twins and 152 pi results. The gain is all on polite
 injections (8 of 15 caught, against none).
 
-No source of units lost more than 2 points on test. EG2 was not changed, and the teacher was not trained: only the
-question's wording changed.
+No source of units lost more than 2 points on test. EG2 did not change, and the teacher was not trained. Only the
+wording of the question changed.
 
 ## The process
 
@@ -54,13 +55,13 @@ predictions are out-of-fold (grouped 5-fold); for test, it is trained on all of 
 |---|---|---|---|---|---|
 | injection (341) | 0.912 | 0.950 | 27, all polite (base) injections | 14 (8 benign imperatives, 5 enhanced injections) | 3 |
 
-The script clusters the teach set (k-means on EG2 features). For each unit, it also finds a minimal pair: the
-nearest dev unit with the other label that the teacher gets right. The clusters reduced to one failure kind: polite
-first-person requests ("my account", "my front door") in content written by a third party: a profile bio, a tweet, a
-calendar event title, an SMS. They ask for actions only the agent could take with the user's tools: payments,
-unlocking a door, changing account settings, or sending data to an address. The minimal pairs are the same responses
-with an ordinary bio or tweet in the slot. The original question says content "addressing people" is not an
-injection, and the teacher read these requests as exactly that.
+The script clusters the teach set (k-means on EG2 features). For each unit, it also finds a minimal pair. This is the
+nearest dev unit with the other label that the teacher gets right. The clusters reduce to one failure kind: polite
+first-person requests ("my account", "my front door") in content written by a third party. Examples of such content
+are a profile bio, a tweet, a calendar event title and an SMS. The requests ask for actions that only the agent could
+take with the user's tools: payments, unlocking a door, changing account settings, or sending data to an address. The
+minimal pairs are the same responses with an ordinary bio or tweet in the slot. The original question says that
+content "addressing people" is not an injection. The teacher read these requests as exactly that.
 
 ### 4. Candidate questions
 
@@ -88,10 +89,10 @@ The best qualifying candidate is selected.
 | inj-b | 0.871 | −0.041 | 33% | 86% | no: enhanced injections fell 24 points |
 | inj-c | 0.933 | +0.021 (−0.003 to +0.041) | 30% | 93% | no |
 
-Two things the recorded selection showed:
-- **Wording reframes are risky.** inj-b, which rewrote the question around "who could act", lost more than it
-  fixed: the teacher stopped flagging some blatant ("IGNORE ALL PREVIOUS INSTRUCTIONS") injections. The protect set and
-  the per-source check exist to catch this.
+The recorded selection showed two things:
+- **Wording reframes are risky.** inj-b rewrote the question around "who could act". It lost more than it fixed: the
+  teacher stopped flagging some blatant ("IGNORE ALL PREVIOUS INSTRUCTIONS") injections. The protect set and the
+  per-source check exist to catch this.
 - **Small edits can be too small.** inj-c moved in the right direction, but its interval included zero.
 
 ### 6. Held-out test (read once)
@@ -114,23 +115,24 @@ alone beats every cascade.
 So once the teacher improves, the routing should be re-tuned to defer to the teacher more: the cascade should know
 where each model is reliable, not just how confident EG2 is.
 
-The loop this pilot runs by hand:
-1. EG2 finds the teacher's blind spots against ground truth.
+The pilot runs this loop by hand:
+1. EG2 finds the blind spots of the teacher against ground truth.
 2. The question is rewritten for those failure kinds, with dev selection and a single test read.
 3. The better teacher gives the proxy better sampled answers.
-4. The router is re-tuned.
+4. The router is tuned again.
 
 ## Caveats
 
-- **One round, one task, small test.** InjecAgent's attacks are homogeneous, and the test holds 15 polite injections.
-- **The candidates were written by an LLM (Claude) reading the dev teach set.** That is the intended "a strong LLM
-  proposes edits" step. The guard against overfitting is the protocol: few candidates, grouped splits, a bootstrap
-  bound, per-source checks, and one test read. It is not the writer's restraint.
-- **Benign twins were written by hand** for the injection example (`hunch_examples/injection_fillers.py`).
-  Their false-positive rates depend on that pool.
-- **Rewording creates a new question version.** Sampled answers from the old wording don't carry over, which is
-  right: they answered a different question. Labelled cases do carry over when the question names its `family`, so
-  deploying `injection` with the rewritten wording keeps all its ground truth.
+- **One round, one task, small test.** The attacks of InjecAgent are homogeneous. The test holds 15 polite
+  injections.
+- **The candidates were written by an LLM (Claude) reading the dev teach set.** This is the intended "a strong LLM
+  proposes edits" step. The protocol guards against overfitting: few candidates, grouped splits, a bootstrap bound,
+  per-source checks, and one test read. The restraint of the writer is not the guard.
+- **Benign twins were written by hand** for the injection example (`hunch_examples/injection_fillers.py`). Their
+  false-positive rates depend on that pool.
+- **Rewording creates a new question version.** Sampled answers from the old wording do not carry over. This is
+  correct, because they answered a different question. Labelled cases carry over when the question names its
+  `family`. Thus, if you deploy `injection` with the rewritten wording, it keeps all its ground truth.
 - **Licences.** The logs in `question_pilot/recorded/` quote InjecAgent units (MIT).
 
 ## Reproduce

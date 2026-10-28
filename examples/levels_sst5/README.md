@@ -22,12 +22,13 @@ uv run levels_sst5/levels_sst5.py
 
 ## Findings
 
-- From 1,000 contrast sentences, the spec's levels (final layer, ridge) reach QWK 0.625 [0.599, 0.649] (95% bootstrap
-  interval); with `layer: auto` (final layer, diff of means) QWK 0.70 and within-one 0.89, the same as logistic
-  regression trained on all 8,544 labelled sentences. The Results table reports the spec, as for every example.
-- The teacher (Clef) zero-shot reaches accuracy 0.592 and QWK 0.839 [0.824, 0.851], ahead of the spec by 0.214
-  [0.187, 0.241]. The spec's cascade reaches 0.501 and QWK 0.78 with EG2 answering 44%.
-- Additional labels don't close the gap: a student on 60 calibration plus 200 labelled test-distribution sentences
-  (5-fold cross-fitting) reaches QWK 0.58, below the spec; the teacher recalibrated on the same labels stays at 0.839,
-  and combining the two gives 0.828, slightly below the teacher (−0.011 [−0.021, −0.001]). Sentiment intensity is
-  barely in the embedding.
+- From 1,000 contrast sentences, the levels of the spec (final layer, ridge) reach QWK 0.625 [0.599, 0.649] (95%
+  bootstrap interval). With `layer: auto` (final layer, diff of means), the result is QWK 0.70 and within-one 0.89.
+  This is the same as logistic regression trained on all 8,544 labelled sentences. The Results table reports the
+  spec, as for every example.
+- The teacher (Clef) zero-shot reaches accuracy 0.592 and QWK 0.839 [0.824, 0.851]. This is ahead of the spec by
+  0.214 [0.187, 0.241]. The cascade of the spec reaches 0.501 and QWK 0.78, with EG2 answering 44%.
+- Additional labels do not close the gap. A student on 60 calibration sentences plus 200 labelled test-distribution
+  sentences (5-fold cross-fitting) reaches QWK 0.58. This is below the spec. The teacher recalibrated on the same
+  labels stays at 0.839. A combination of the two models gives 0.828. This is slightly below the teacher (−0.011
+  [−0.021, −0.001]). Sentiment intensity is barely in the embedding.

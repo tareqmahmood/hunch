@@ -1,7 +1,7 @@
 # browser: EG2 on WebGPU, in a tab
 
-EmbeddingGemma 2's image path, hand-written in WGSL, runs a webcam object namer entirely in the browser: the camera,
-the embedding, the student and the voice all stay in the tab, and nothing is installed.
+EmbeddingGemma 2's image path, hand-written in WGSL, runs a webcam object namer entirely in the browser. The camera,
+the embedding, the student and the voice all stay in the tab. Nothing is installed.
 
 From the repository's root, after the [setup](../README.md#setup) (which downloads the checkpoint):
 

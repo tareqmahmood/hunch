@@ -8,8 +8,8 @@ each example, keyed by hashes, so every comparison replays without running it.
 
 ## Setup
 
-Follow the [repository's setup](../README.md#setup) first (Rust, uv and the EmbeddingGemma 2 checkpoint, which every
-example needs). Run every command here from `examples/`.
+First, follow the [repository's setup](../README.md#setup). Every example needs Rust, uv and the EmbeddingGemma 2
+checkpoint. Run every command here from `examples/`.
 
 ```bash
 cd examples
@@ -19,11 +19,11 @@ uv run download.py embeddinggemma-2 sst5 InjecAgent   # asks before each downloa
                                                       # without a terminal to answer in)
 ```
 
-Datasets go to `data/hf/` (git-ignored), or to `EG2_DATA` if you set it. Results go to `results/` (git-ignored): each
-example's own files, its `<example>_teacher.json` comparison, and caches of rebuilt rows and embeddings. The
-model goes to the Hugging Face cache (`HF_HOME`, default `~/.cache/huggingface`); `EG2_MODEL_DIR` points eg2cpu at a
-checkpoint you keep somewhere else instead (`download.py` doesn't write there). Every download is pinned to the
-revision the shipped hashes refer to.
+Datasets go to `data/hf/` (git-ignored), or to `EG2_DATA` if you set it. Results go to `results/` (git-ignored). The
+results are the own files of each example, its `<example>_teacher.json` comparison, and caches of rebuilt rows and
+embeddings. The model goes to the Hugging Face cache (`HF_HOME`, default `~/.cache/huggingface`). `EG2_MODEL_DIR`
+points eg2cpu at a checkpoint that you keep in another place instead. `download.py` does not write there. Every
+download is pinned to the revision that the shipped hashes refer to.
 
 | dataset | size | licence |
 |---|---|---|
@@ -50,8 +50,8 @@ No dataset text ships with the examples. What does:
 - **The question pilot's record:** its candidate questions, selections and dev and test logs
   (`question_pilot/recorded/`).
 
-`hunch_examples/` is the examples' shared package: paths, dataset loaders, the rebuilt rows and the teacher
-comparison.
+`hunch_examples/` is the shared package of the examples. It has the paths, the dataset loaders, the rebuilt rows and
+the teacher comparison.
 
 ## The examples
 
@@ -78,19 +78,22 @@ Run any one from this folder with `uv run <example>/<example>.py`. Times are fro
 
 ## Results
 
-Against ground truth. Each cell is accuracy, or [QWK](../docs/glossary.md#metrics-and-intervals) for graded questions, then macro-F1. Each column follows one rule,
-the same in every row, fixed before the results were read:
-- **EG2:** the example's compiled decision, exactly as its spec is written (its readout, its 60 calibration rows).
-- **EG2, 200 labels (†):** a student on EG2 features (logistic regression) trained on the calibration rows plus up
-  to 200 labelled rows from the test set's own distribution, cross-fitted in 5 folds, so no row is scored by a model
-  trained on it.
+Against ground truth. Each cell is accuracy, or [QWK](../docs/glossary.md#metrics-and-intervals) for graded
+questions, then macro-F1. Each column follows one rule. The rule is the same in every row. The rule is fixed before
+the results are read:
+- **EG2:** The compiled decision of the example, exactly as its spec is written (its readout, its 60 calibration
+  rows).
+- **EG2, 200 labels (†):** A student on EG2 features (logistic regression). It is trained on the calibration rows
+  plus up to 200 labelled rows from the own distribution of the test set. It is cross-fitted in 5 folds, so no model
+  scores a row that it trained on.
 - **teacher:** Clef zero-shot, at its default cut.
-- **teacher, tuned:** Clef's probabilities recalibrated (logistic regression) on the same 200 labels.
-- **EG2 + teacher:** a logistic regression on both models' probabilities, fitted on the same 200 labels.
+- **teacher, tuned:** The probabilities of Clef, recalibrated (logistic regression) on the same 200 labels.
+- **EG2 + teacher:** A logistic regression on the probabilities of both models. It is fitted on the same 200 labels.
 
-Folds are grouped where rows are related: by session on the pi traces, by document type on gretel, and by attack text
-and filler string on InjecAgent (so no attack or benign filler is on both sides of a fold). The clean pi set has no "yes" to learn from, so it
-is scored by the models fitted on the unseen-tools injection labels, which never saw a pi output.
+Folds are grouped where rows are related. On the pi traces, folds are grouped by session. On gretel, they are grouped
+by document type. On InjecAgent, they are grouped by attack text and filler string, so no attack or benign filler is
+on both sides of a fold. The clean pi set has no "yes" to learn from. The models fitted on the unseen-tools injection
+labels score it. These models never saw a pi output.
 
 | example | test set (n) | metric | EG2 | EG2, 200 labels † | teacher | teacher, tuned | EG2 + teacher |
 |---|---|---|---|---|---|---|---|
@@ -159,7 +162,7 @@ calls, not judgement. Each example's README has its full results.
 
 ## The teacher answers
 
-`<example>/teacher.jsonl` holds everything that example needs, one answer per line:
+`<example>/teacher.jsonl` holds everything that the example needs, one answer per line:
 
 ```json
 {"question": "ca598a2fb543eb50", "state": "7ba0993146ea25bb", "answer": {"type": "noul", "noul": 0.0882}, "model": "clef-flash"}
@@ -172,16 +175,16 @@ calls, not judgement. Each example's README has its full results.
 - `model` names the teacher that answered: `clef-flash` (Clef-Flash, 9B, 4-bit MLX, run locally) for every shipped
   answer. Its prompt template and decoding settings are not recorded in these files.
 
-If an example's units have no answer in its file, it copies one from another example's file with the same question
-and state; otherwise, with `TEACHER_URL` set, it asks that endpoint (`{"state", "questions"}` in, `{"answers"}` out)
-and appends the answer; otherwise it skips the comparison and says how many answers are missing.
+If the units of an example have no answer in its file, the example copies one from the file of another example with
+the same question and state. Otherwise, if `TEACHER_URL` is set, it asks that endpoint (`{"state", "questions"}` in,
+`{"answers"}` out) and appends the answer. Otherwise, it skips the comparison and says how many answers are missing.
 
 ```bash
 TEACHER_URL=http://localhost:8000/v1/answer uv run tool_call_failed/tool_call_failed.py
 ```
 
-The proxy reads the same files: `python -m hunch serve --backend offline:data/teacher_stream.jsonl` replays the
-teacher without running it, which is how `proxy_service` works.
+The proxy reads the same files. `python -m hunch serve --backend offline:data/teacher_stream.jsonl` replays the
+teacher without running it. This is how `proxy_service` works.
 
 ### Other teachers
 

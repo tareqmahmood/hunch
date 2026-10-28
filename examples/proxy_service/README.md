@@ -1,7 +1,7 @@
 # proxy_service: the proxy as an HTTP service
 
-The hunch proxy end to end over HTTP, on 2,000 real coding-agent tool results, with the teacher's recorded answers
-standing in for the teacher, so the run needs no teacher.
+This runs the whole hunch proxy over HTTP on 2,000 real tool results from coding agents. It does not call a live
+teacher. It replays the recorded answers of the teacher, so you do not need a teacher to run it.
 
 From `examples/`:
 
@@ -36,10 +36,10 @@ The stream's three questions (`hunch_examples.STREAM_QUESTIONS`):
 
 ## Findings
 
-Over the last 500 results (each a request per question). "Student" counts only answers that made no teacher call:
-an audited answer did call the teacher, and a store hit reuses an answer the teacher gave before. Agreement is
-measured on the student's answers in the same 500, beside what always giving the teacher's most common answer would
-score on them:
+The data is the last 500 results (each is a request for each question). "Student" counts only answers that made no
+teacher call. An audited answer did call the teacher. A store hit reuses an answer that the teacher gave before.
+Agreement is measured on the answers of the student in the same 500. The table also shows the score that the most
+common answer of the teacher would get on them if it was always given:
 
 | question | student, no teacher call | audited | from the store | forwarded | teacher calls per request | student agreement with the teacher | always the most common answer |
 |---|---|---|---|---|---|---|---|
@@ -54,4 +54,4 @@ score on them:
 - `severity` never graduates; the 6% of its requests about a state seen before are answered from the store.
 
 Agreement is with the teacher, not with ground truth. `proxy_replay` replays the same stream with its own copy of the
-policy, all at once rather than one request per question, so its shares differ.
+policy. It replays all requests at once, not one request per question. So its shares differ.

@@ -1,11 +1,13 @@
 # pii: can embeddings tell that a text holds PII?
 
-Can EmbeddingGemma 2 tell whether a window of text contains a personal data value, which kind, and from which layer?
-eg2cpu returns mean-pooled readouts, not per-token states, so this asks *whether* a window holds PII, not where.
+Can EmbeddingGemma 2 tell whether a window of text contains a personal data value? Can it tell which kind, and from
+which layer? eg2cpu returns mean-pooled readouts, not per-token states. Thus this asks *whether* a window holds PII,
+not where.
 
 ![held-out gretel windows streamed through the compiled contains_pii decision, each answer with its time and whether it was right](pii.gif)
 
-*60 held-out gretel windows (document types the decision never saw) through `contains_pii`, live on the CPU: each answer appears after the time it took (median 35 ms) and holds for 100 ms*
+*60 held-out gretel windows (document types the decision never saw) through `contains_pii`, live on the CPU. Each
+answer appears after the time it took (median 35 ms) and stays for 100 ms*
 
 From `examples/`:
 
