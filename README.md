@@ -1,16 +1,16 @@
 # hunch
 
-hunch is a systemone-style server that answers questions (e.g. "did this tool call fail?" or 
-"does this output contain a prompt injection?"), on CPU in milliseconds. It learns and then graduates from a slower, more expensive "teacher" model and
+hunch is a "System One"-style server that answers questions (e.g. "did this tool call fail?" or 
+"does this output contain a prompt injection?"), on _CPUs_ in milliseconds. It learns and then graduates from a slower, more expensive "teacher" model and
 keeps itself up-to-date by checking in, even after it graduates.
 
 If LLMs are about _thinking hard_, and decision models are about fast _intuition_, hunch is like the fast _reflex_
 system you can use for repetitive tasks.
 
 hunch is designed to fit into systems built around tiers of reasoning for answering questions. Frontier LLMs will get
-the answer right more often, but are cost and speed prohibitive to run on thousands of records or near-real time. "System-one"
-style models like Jev, Clef, or djev are faster, but often large models with large memory requirements and 100s of
-milliseconds of latency.
+the answer right more often, but are cost and speed prohibitive to run on thousands of records or near-real time. "System One"-style models
+like Jev, Clef, or djev are faster, but often larger models with much large memory requirements than hunch and 100s of
+milliseconds of latency vs 10s.
 
 ![tool calls graded by hunch, clef, luna and the costs (hunch is faster and cheaper, luna the slowest and most expensive)](docs/demo/hunch-demo.gif)
 
