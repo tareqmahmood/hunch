@@ -69,51 +69,46 @@ code, tool calls, and it's useful to analyze all of these traces for correctness
 metrics in as real-time a way as possible.
 
 Agent systems ask the same small questions over and over, on every step of every trace. The usual answer is an LLM
-judge: hundreds of milliseconds and a model call per question.
+or decision model judge: hundreds of milliseconds and a model call per question.
 
-Most of those questions are easy most of the time. hunch sits in front of your judge and learns from its answers. A
-question's student starts answering only once cross-validation shows it agrees with the judge often enough, and it
-keeps being audited against the judge afterwards. Everything else, including any state unlike those it learned from,
-still goes to the judge. You keep your judge in the loop, but you call it less.
+_Most_ of those questions are easy _most_ of the time. hunch sits in front of your judge (its teacher) and learns from its answers. hunch
+only starts answering only once cross-validation shows it agrees with the teacher often enough. It's continually audited
+against the teacher afterwards to make sure it's still answering well. If it sees something that's too far outside
+of what it learned, it sends it to the teacher to help it tune itself.
+
+You keep your judge in the loop, but you call it less!
 
 - **Cheaper and faster.** On 2,000 real coding-agent tool results, hunch's students answered 69–75% of requests
-  with no judge call over the last 500. For the output kind they agree with the judge 97% of the time, where always
-  giving its most common answer would agree 31%; for "did this tool call fail?" they answer only a confident "no",
-  and leave every likely failure to the judge. A local answer takes about 20 ms on a laptop CPU; the encoder costs
-  about $0.004–0.01 per million tokens on a Graviton 4 server.
+  with no judge call over the last 500.
 - **Sometimes better than a tuned judge, often not.** Given 200 labelled examples, EG2 beats the judge with its own
   cut points tuned on the same labels on 2 of 9 test sets in the examples (tool failure, and prompt injection in
   unseen tool formats), is level on 4 and behind on 3; combining the two beats the tuned judge on 1 and is level on 6.
-  A student fitted on one dataset's labels can fail badly on other traffic: injection students trained on InjecAgent
-  flag 47% of ordinary coding-agent outputs. Judges have blind spots too: the test judge caught only 20% of politely
-  worded prompt injections, where a student trained on labels caught 81% of held-out ones. The examples' judge is
-  Clef (Clef-Flash, a 9B model run locally in 4-bit MLX).
-- **No GPU, and nothing leaves your machines.** The encoder is a Rust engine for commodity CPUs.
+- **No GPU.** EmbeddingGemma 2 is run using a Rust engine for commodity CPUs.
 
-**When it doesn't fit:** questions whose answer isn't in the text itself. "How bad is this failure, and who can fix
-it?" needs context and reasoning, and stays with the judge. [docs/question-design.md](docs/question-design.md) has a
+### Where it doesn't fit
+
+hunch works best when the answer is in the text. "How bad is this failure, and who can fix
+it?" needs context and reasoning in many cases. You can still use hunch in these cases, and it will
+forward those on to the upstream judge instead of guessing badly. [docs/question-design.md](docs/question-design.md) has a
 pre-flight check that tells you which of your questions hunch can take over before you deploy.
 
 ## What's here
 
-- **[hunch](hunch/):** the proxy. Start here: it explains the request format, how hunch decides who answers, and how
-  to run it.
-- **[eg2cpu](eg2cpu/):** the engine hunch runs on. It runs Google's EmbeddingGemma 2 embedding model (text and
-  images) on CPU, in Rust, with Python bindings. It can stop after any layer to save time, and it can apply compiled
-  *decisions*: small files that turn an embedding into a calibrated answer to one question, without a teacher.
-- **[examples](examples/):** experiments on public datasets (coding-agent traces, InjecAgent, SST-5, PII), each with
-  what it measures and what it found, and comparisons with an LLM judge (Clef) using its recorded answers, so they
-  run offline.
+- **[hunch](hunch/):** the proxy.
+- **[eg2cpu](eg2cpu/):** the engine hunch runs on: Google's EmbeddingGemma 2 embedding model, with an optimized CPU
+  engine. Can be used on its own if hunch doesn't meet your needs.
+- **[examples](examples/):** experiments on public datasets (coding-agent traces, InjecAgent, SST-5, PII) that
+  you can test offline.
 - **[docs](docs/):** [designing questions hunch can take over](docs/question-design.md),
   [performance](docs/performance.md) and a [glossary](docs/glossary.md).
 
 ## Performance
 
-- **hunch:** a request its students answer takes about 22 ms (p50) on an Apple M5 Pro, for a tool result of about 190
-  tokens. Under load, concurrent requests share batched encoder passes: 86 requests/s at 32 concurrent callers, p99
+- **hunch:** text decisions in 22 ms (p50) on an Apple M5 Pro, for a tool result of about 190
+  tokens. Under load, concurrent requests: 86 requests/s at 32 concurrent callers, p99
   466 ms. See [hunch/README.md](hunch/README.md#performance).
-- **eg2cpu:** encoding a 32-token text to layer 8, the layer the students read, takes about 0.6 ms per text in batches
-  on a 24-core Sapphire Rapids server with AMX. Per-hardware numbers are in [docs/performance.md](docs/performance.md).
+- **eg2cpu:** encoding a 32-token text to layer 8 (an optimized path hunch often takes), takes about 0.6 ms per text in batches on a
+  24-core Sapphire Rapids server with AMX. Per-hardware numbers are in [docs/performance.md](docs/performance.md).
 
 ## Setup
 
@@ -123,11 +118,11 @@ You need Rust (1.88 or later) and [uv](https://docs.astral.sh/uv/). `uv` and `ma
 uv sync --all-packages
 ```
 
-The proxy's tests don't need the model; running hunch, the examples and eg2cpu's tests do. The model is
-`google/embeddinggemma-2`, Apache-2.0 and not gated on Hugging Face (as of October 2026), so no login is needed:
-`cd examples && uv run download.py embeddinggemma-2` (1.4 GB; add `--yes` when there's no terminal to answer its
-question). It goes to the Hugging Face cache (`HF_HOME`, default `~/.cache/huggingface`). To keep the checkpoint
-somewhere else, put it there yourself and set `EG2_MODEL_DIR` to that folder; eg2cpu then reads it from there.
+Download the model:
+
+```bash
+cd examples && uv run download.py embeddinggemma-2 --yes
+```
 
 ## Tests
 
