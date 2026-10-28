@@ -1,7 +1,7 @@
 # hunch
 
-hunch sits in front of a model you already use to answer questions about agent traces, such as "did this tool call
-fail?", and learns to answer the easy ones itself.
+hunch sits in front of a /v1/systemone model you already use to answer questions about textual data, such as 
+"did this tool call fail in this agent trace?", and learns to answer the easy ones itself.
 
 - **The teacher** is that model: an LLM judge or a dedicated decision model behind HTTP. hunch sends it every
   question it can't answer yet and keeps the answers.
@@ -46,7 +46,7 @@ hunch POSTs the teacher the request it received, `{"state": ..., "questions": {i
 - `choice`: `{"type": "choice", "probabilities": {"test_run": 0.9, "build": 0.05, "other": 0.05}}`;
 - `score`: `{"type": "score", "probabilities": {"0": 0.1, "1": 0.7, "2": 0.2}}`, by level index.
 
-hunch's own answers have the same shape, plus `choice` or `score` and `confidence` fields.
+hunch's response is the same, plus `choice` or `score` and `confidence` fields.
 
 `--backend` is the teacher's URL, or `offline:<file or folder>` to replay recorded answers (as the examples do; a
 missing answer is then an error, unless `--fallback <url>` names a teacher to ask, and `--record <file>` saves its
@@ -270,6 +270,59 @@ proxy.wait()                       # until pending refits and background audits 
 ```
 
 Custom stores implement `hunch.Store`.
+
+## Live images: `hunch.live`
+
+The proxy answers questions about text states behind a teacher. `hunch.live` answers questions about a stream, from
+one EG2 embedding per item, and learns from the items a person or a teacher labels as it runs. An item is an image,
+such as a webcam frame (about 110 ms on an Apple M5 Pro's CPU at 70 soft tokens), or a text (about 12 ms for a short
+tool result, by the full pass, so it shares the prompts' space).
+
+```python
+from hunch.live import Choice, Detector, Eyes, Watcher
+
+eyes = Eyes(tokens=70)
+seen = Choice(eyes, {"nothing": ["a person with empty hands"], "mug": ["a person holding up a mug"]},
+              quiet={"nothing"}, empty="nothing", new=lambda name: [f"a person holding up a {name}"])
+fire = Detector(eyes, yes=["a photo of fire"], no=["a normal indoor photo"], threshold=-0.04)
+
+x, ms = eyes.see(jpeg)            # or eyes.see("bash('npm test') -> 'Error: Timeout of 2000ms exceeded'")
+seen.ask(x)                     # {"name", "p", "state": quiet | sure | unsure, "probs", "zero", ...}
+seen.teach(x, "seashell")       # a new answer, with new("seashell")'s prompts; the student refits in the background
+seen.forget()                   # back to the answers it started with
+watcher = Watcher(seen, teacher)  # teacher(jpeg, names) -> {name or hunch.live.ELSE: probability}
+watcher.look(jpeg, x, seen.ask(x))
+```
+
+- Every answer starts zero-shot from its text prompts. Labelled frames train a logistic regression, which answers as
+  far as a frame resembles the frames it was taught, measured from the `empty` answer's frames.
+- A `Watcher` asks the teacher about the newest frame only when that's worth it, one look at a time, and labels the
+  frames it's sure about.
+- An `Album` keeps labelled frames (images or texts) on disk to teach again after a restart.
+- For text behind a teacher, the proxy is the better fit: it reads layer 8, graduates a question before answering it
+  locally, audits, and forwards whatever it isn't sure of. `hunch.live` always answers, so it suits streams someone
+  is watching and teaching.
+
+[`examples/objects`](../examples/objects/) and [`examples/gestures`](../examples/gestures/) are built on it, and the
+module's docstring has the details.
+
+### In the browser
+
+[`web/live.ts`](web/live.ts) is the same `Choice`, `Detector` and `Watcher` in TypeScript, with `Eyes` running EG2's
+image path on the GPU through WebGPU ([`web/eg2/`](web/eg2/), about 60 ms a frame on an Apple M5 Pro in Chrome). The
+browser runs no text path, so prompts arrive as vectors embedded beforehand with eg2cpu. `web/dist/live.js` is the
+bundle; `npm run build` in `web/` makes it again, and `npm run check` type-checks.
+
+```js
+import { Choice, Eyes } from './hunch/web/dist/live.js';
+
+const eyes = await Eyes.open({ weights: 'weights', tokens: 70 });   // examples/browser/convert.py writes the weights
+const things = new Choice({ nothing: nothingVector, mug: mugVector }, { quiet: ['nothing'], empty: 'nothing' });
+const { x, ms } = await eyes.see(video);
+things.ask(x); things.teach(x, 'seashell'); things.forget();
+```
+
+[`examples/browser`](../examples/browser/) is built on it.
 
 ## Tests
 
