@@ -1,14 +1,12 @@
 # hunch
 
-hunch sits in front of a /v1/systemone model you already use to answer questions about textual data, such as 
-"did this tool call fail in this agent trace?", and learns to answer the easy ones itself.
+hunch is a proxy: it sits in front of a /v1/systemone model you already use to answer questions about textual data, such as 
+"did this tool call fail in this agent trace?". It learns to answer the easy ones itself, but way faster.
 
-- **The teacher** is that model: an LLM judge or a dedicated decision model behind HTTP. hunch sends it every
-  question it can't answer yet and keeps the answers.
-- **The student** is hunch's own classifier, one per question: logistic regression on layer 8 of EmbeddingGemma 2
-  (run on CPU by `eg2cpu`). Once cross-validation on the teacher's answers shows the student agrees with the teacher
-  often enough, the question *graduates* and the student answers it.
-- **A state** is what a question is asked about: a tool call and its output, a message, or any JSON.
+- **The teacher** either an LLM judge or a dedicated decision model. This is what hunch learns from.
+- **The student** is hunch's own classifier model, one per question: Once cross-validation on the teacher's answers
+  shows the student agrees with the teacher often enough, the question *graduates* and the student answers it.
+- **A state** what we ask questions about: e.g. a tool call and its output, a message (or really any JSON).
 
 A question has a type:
 - `noul`: yes or no (the question protocol's name for it), answered as P(yes);
@@ -30,8 +28,9 @@ curl -s localhost:8765/v1/answer -d '{"state": {"call": "bash: ls config/", "out
 {"answers": {"failed": {"type": "noul", "noul": 0.97, "answered_by": "backend"}}, "answered_by": "backend", "model": "teacher"}
 ```
 
-`answered_by` says who answered: `backend` (the teacher), `proxy` (the student) or `cache` (the store, for a state it
-already has an answer for). A question with options looks like this:
+`answered_by` lets you know who got it: `backend` (the teacher), `proxy` (the student) or `cache` (previously answered, reused).
+
+A question with options looks like this:
 
 ```json
 {"type": "choice", "instructions": "What kind of output is this?",
