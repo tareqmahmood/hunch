@@ -24,7 +24,19 @@ user comments, transcripts... anything you like! (multi-modal support in the hun
 hunch also ships with `hunch.live` - a Python and TypeScript library allowing you to build dynamic `choice`-style questions
 in real-time on both text and images, learning from both a teacher model and user feedback.
 
-![the objects demo naming an orange held up to a webcam, with Clef teaching](docs/demo/objects.png) ![the gestures demo reading a thumbs up and a smile from a webcam](docs/demo/gestures.png)
+<table border=0>
+
+<tr><td>
+  
+![the objects demo naming an orange held up to a webcam, with Clef teaching](docs/demo/objects.png) 
+
+</td><td>
+
+![the gestures demo reading a thumbs up and a smile from a webcam](docs/demo/gestures.png)
+
+</td></tr>
+
+</table>
 
 *webcam demos built on `hunch.live`: [objects](examples/objects/) (left) and [gestures](examples/gestures/) (right)*
 
