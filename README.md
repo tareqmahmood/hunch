@@ -97,7 +97,7 @@ pre-flight check that tells you which of your questions hunch can take over befo
 
 ## What's here
 
-- **[hunch](hunch/):** the proxy.
+- **[hunch](hunch/):** the proxy (including [hunch.live](hunch/src/hunch/live.py)).
 - **[eg2cpu](eg2cpu/):** the engine hunch runs on: Google's EmbeddingGemma 2 embedding model, with an optimized CPU
   engine. Can be used on its own if hunch doesn't meet your needs.
 - **[examples](examples/):** experiments on public datasets (coding-agent traces, InjecAgent, SST-5, PII) that
