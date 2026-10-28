@@ -3,6 +3,10 @@
 Can a compiled decision tell an attacker instruction hidden in a tool response from benign content in the same slot,
 on tools and attacks it has never seen?
 
+![held-out InjecAgent tool outputs streamed through the compiled injection decision, each answer with its time and whether it was right](prompt_injection.gif)
+
+*60 held-out InjecAgent tool outputs (unseen tools and attacks, with benign twins) through `injection_in_tool_output`, live on the CPU: each answer appears after the time it took (median 49 ms) and holds for 100 ms*
+
 ```bash
 uv run prompt_injection/prompt_injection.py
 ```
