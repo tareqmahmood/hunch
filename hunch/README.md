@@ -39,20 +39,19 @@ A question with options looks like this:
 
 ## The teacher
 
-hunch POSTs the teacher the request it received, `{"state": ..., "questions": {id: question}}`, and expects
+hunch sends a `POST` request to the teacher, `{"state": ..., "questions": {id: question}}`, and expects
 `{"answers": {id: answer}}` back, with an answer for every question:
 - `noul`: `{"type": "noul", "noul": 0.97}`, P(yes);
 - `choice`: `{"type": "choice", "probabilities": {"test_run": 0.9, "build": 0.05, "other": 0.05}}`;
 - `score`: `{"type": "score", "probabilities": {"0": 0.1, "1": 0.7, "2": 0.2}}`, by level index.
 
-hunch's response is the same, plus `choice` or `score` and `confidence` fields.
+hunch's returns the same response, plus `choice` or `score` and `confidence` fields.
 
-`--backend` is the teacher's URL, or `offline:<file or folder>` to replay recorded answers (as the examples do; a
-missing answer is then an error, unless `--fallback <url>` names a teacher to ask, and `--record <file>` saves its
-answers). `--backend-header 'Authorization: Bearer …'` adds headers to the teacher's requests, and
-`--backend-timeout` (default 30 s) bounds them. A teacher that fails, times out, leaves a question out, or gives a
-malformed answer (probabilities that aren't finite numbers in [0, 1], one per option) gets the client a 502, and
-nothing from that response is learned.
+ - `--backend`: is the teacher's URL. 
+ - `--backend-header 'Authorization: Bearer …'`: adds headers to the teacher's requests, and
+ - `--backend-timeout` (default 30 s) sets a timout.
+
+A teacher that fails, times out, leaves a question out, or gives a malformed answer returns 502 to the caller.
 
 ## How it decides
 
