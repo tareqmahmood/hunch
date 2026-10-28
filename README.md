@@ -67,7 +67,7 @@ hunch trains the student on the teacher's judgements and then takes over once it
 
 ## Why
 
-(... and why we build it!)
+(... and why we built it!)
 
 One _very_ useful area for decision models is agent trace analysis. Agent loops generate hundreds of lines of prose,
 code, tool calls. We need to analyze all of these traces, in real-time, for correctness, failure modes, safety or other
