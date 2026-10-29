@@ -520,6 +520,48 @@ def test_known_states_are_answered_from_the_store(db):
     assert proxy.answer({"state": st, "questions": {"f": FAILED, "k": KIND}})["answered_by"] == "backend"
 
 
+def test_store_hits_are_not_encoded(db):
+    model = FakeModel()
+    proxy = Proxy(model, Teacher(), db(), audit=0.0)
+    st = {"call": "bash: make", "output": "error: build failed"}
+    proxy.answer({"state": st, "questions": {"f": FAILED}})
+    encoded = len(model.batches)
+    proxy.encoder._cache.clear()  # so only a store hit can skip the encoder
+    assert proxy.answer({"state": st, "questions": {"f": FAILED}})["answered_by"] == "cache"
+    assert len(model.batches) == encoded
+
+
+def test_the_teacher_is_asked_while_the_state_is_encoded(db):
+    """A request that must go to the teacher (a question not graduated, or demoted) doesn't wait for its encoding
+    first: the teacher is asked while the encoder runs, and the answer is still learned from."""
+    import time
+
+    model = FakeModel(delay=0.3)
+    teacher = Teacher()
+    encoded_when_asked = []
+
+    def slow_teacher(req):
+        encoded_when_asked.append(model.encoded)
+        time.sleep(0.3)
+        return teacher(req)
+
+    real = model.embed_batch_partial
+
+    def flagged(texts, upto):
+        out = real(texts, upto)
+        model.encoded = True
+        return out
+
+    model.encoded, model.embed_batch_partial = False, flagged
+    proxy = Proxy(model, slow_teacher, db(), audit=0.0)
+    t0 = time.perf_counter()
+    r = proxy.answer({"state": {"call": "bash: make", "output": "error: build failed"}, "questions": {"f": FAILED}})
+    took = time.perf_counter() - t0
+    assert r["answered_by"] == "backend" and encoded_when_asked == [False]
+    assert took < 0.5  # the slower of the two, not their sum (0.6 s)
+    assert proxy.question_status(question_key(FAILED))["examples"] == {"sampled": 1}
+
+
 def test_a_repeated_state_is_one_example(db):
     proxy = Proxy(FakeModel(), Teacher(), db(), audit=0.0, memo=False)
     st = {"call": "bash: ls", "output": "ok all good done"}

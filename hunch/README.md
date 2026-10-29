@@ -65,6 +65,11 @@ For each request, in order:
 3. **The teacher.** Otherwise the whole request goes to the teacher. The teacher reads the state once for all
    questions. Every answer becomes a training example.
 
+The store is read by the hash of the state's text, so a stored answer needs no encoding. And when a question in the
+request hasn't graduated, or is demoted, the request is bound for the teacher whatever its features say: hunch asks
+the teacher at once and encodes the state at the same time, for learning and audits. Until a question graduates, a
+request then takes as long as the slower of the two, not both one after the other.
+
 **Graduation.** A refit retrains a question's student and cross-validates it on its examples. The question
 graduates in one of two modes:
 - **symmetric:** on the states it is confident enough to answer, the student agrees with the teacher at least 90% of

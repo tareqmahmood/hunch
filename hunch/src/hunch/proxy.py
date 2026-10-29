@@ -28,11 +28,14 @@ How it decides (docs/question-design.md says which questions it can take over):
     answered locally, the 95% lower bounds of agreement >= `target` and of recall on the answers other than the most
     common one >= `minority`) or, for a yes/no question, one-sided (only a confident "no" is answered locally:
     recall of forwarded "yes" >= 0.85 and local miss rate <= 2%, both bounds at 95%); whichever covers more.
-  - A state the store already has an answer for (a label, or the teacher's last answer) is answered from the store.
+  - A state the store already has an answer for (a label, or the teacher's last answer) is answered from the store,
+    without encoding it.
   - Otherwise a request is answered locally only if every question in it has graduated, is confident, isn't demoted,
     and the state is not novel (its most similar example is at least as similar as the 5th percentile of
     example-to-example nearest-neighbour similarities). Otherwise the whole request goes to the teacher (which reads
     the state once for all questions, so a partial forward saves little), and every answer is stored as sampled.
+    When a question in the request hasn't graduated or is demoted, the request goes to the teacher whatever its
+    features say, so the teacher is asked while the state is encoded, not after.
   - Audits: a share `audit` of local answers is also sent to the teacher, in the background, and every forwarded
     request audits the students that would have answered it. Over its last 100 audits, a symmetric question is
     demoted while its agreement is significantly below `target` (95% upper bound), a one-sided one while its miss
@@ -761,6 +764,11 @@ class Encoder:
 
     def __call__(self, texts: list[str]) -> tuple[list[str], np.ndarray]:
         """(state hashes, float32 features [len(texts), d])."""
+        return self.finish(*self.start(texts))
+
+    def start(self, texts: list[str]) -> tuple[list[str], dict[str, Future]]:
+        """Queue the texts not already cached or in flight, without waiting; `finish` waits for them. Lets a caller
+        do something else (ask the teacher) while they are encoded."""
         hashes = [text_hash(t) for t in texts]
         waits: dict[str, Future] = {}
         with self._lock:
@@ -775,6 +783,10 @@ class Encoder:
             if waits and self._thread is None:
                 self._thread = threading.Thread(target=self._run, name="hunch-encode", daemon=True)
                 self._thread.start()
+        return hashes, waits
+
+    def finish(self, hashes: list[str], waits: dict[str, Future]) -> tuple[list[str], np.ndarray]:
+        """(state hashes, float32 features) for what `start` queued."""
         got = {h: f.result() for h, f in waits.items()}
         with self._lock:
             out = []
@@ -1008,8 +1020,7 @@ class Proxy:
         if not questions or "state" not in request:
             raise ValueError("a request needs a state and at least one question")
         text = state_text(request["state"])
-        [h], F = self.features([text])
-        x = F[0]
+        h = text_hash(text)  # what the encoder keys the state by, so the store can be read before it is encoded
         sts = {qid: self._student(q) for qid, q in questions.items()}
         with self.lock:
             self.stats["requests"] += 1
@@ -1024,6 +1035,17 @@ class Proxy:
                     a = answer_object(st.spec, np.asarray(probs) if probs is not None else np.eye(st.k)[lab])
                     answers[qid] = (st.teacher_answer(a, lab, probs) if kind == SAMPLED else a) | {"answered_by": "cache"}
                 return {"model": "hunch", "answers": answers, "answered_by": "cache"}
+        encoding = self.encoder.start([text])
+        if self.backend is not None and any(st.mode is None or st.demoted for st in sts.values()):
+            # A question that hasn't graduated, or is demoted, sends the request to the teacher whatever its features
+            # say: ask the teacher now, while the state is encoded for learning and audits, rather than after.
+            upstream, parsed = self._ask(request)
+            _, F = self.encoder.finish(*encoding)
+            x = F[0]
+            preds = {qid: st.predict(x) for qid, st in sts.items()}
+            return self._forwarded(request, sts, preds, upstream, parsed, h, x, text)
+        _, F = self.encoder.finish(*encoding)
+        x = F[0]
         preds = {qid: st.predict(x) for qid, st in sts.items()}
         if all(local for _, _, local, _ in preds.values()):
             with self.lock:
@@ -1040,6 +1062,11 @@ class Proxy:
                        for qid, (p, _, ok, tier) in preds.items()}
             return {"model": "hunch", "answers": answers, "answered_by": "partial"}
         upstream, parsed = self._ask(request)
+        return self._forwarded(request, sts, preds, upstream, parsed, h, x, text)
+
+    def _forwarded(self, request, sts, preds, upstream, parsed, h, x, text) -> dict:
+        """Learn from the teacher's answers to a forwarded request, and answer with them."""
+        questions = request["questions"]
         with self.lock:
             self.stats["forwarded"] += 1
         self._learn(sts, preds, parsed, h, x, text)
