@@ -562,6 +562,22 @@ def test_the_teacher_is_asked_while_the_state_is_encoded(db):
     assert proxy.question_status(question_key(FAILED))["examples"] == {"sampled": 1}
 
 
+def test_a_cached_state_evicted_while_the_teacher_answers(db):
+    """A state already in the encoder's cache when the teacher is asked can be evicted by other requests before the
+    teacher answers; the request still gets the teacher's answer."""
+    teacher = Teacher()
+
+    def busy_teacher(req):
+        proxy.encoder(["bash: ls other traffic"])  # with a cache of one, this evicts the request's state
+        return teacher(req)
+
+    proxy = Proxy(FakeModel(), busy_teacher, db(), audit=0.0)
+    proxy.encoder.cache_size = 1
+    st = {"call": "bash: make", "output": "error: build failed"}
+    proxy.features([state_text(st)])
+    assert proxy.answer({"state": st, "questions": {"f": FAILED}})["answered_by"] == "backend"
+
+
 def test_a_repeated_state_is_one_example(db):
     proxy = Proxy(FakeModel(), Teacher(), db(), audit=0.0, memo=False)
     st = {"call": "bash: ls", "output": "ok all good done"}

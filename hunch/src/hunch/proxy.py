@@ -768,12 +768,19 @@ class Encoder:
 
     def start(self, texts: list[str]) -> tuple[list[str], dict[str, Future]]:
         """Queue the texts not already cached or in flight, without waiting; `finish` waits for them. Lets a caller
-        do something else (ask the teacher) while they are encoded."""
+        do something else (ask the teacher) while they are encoded. A cached text's vector is taken now, as a finished
+        future, so evicting it before `finish` doesn't lose it."""
         hashes = [text_hash(t) for t in texts]
         waits: dict[str, Future] = {}
         with self._lock:
             for h, t in zip(hashes, texts):
-                if h in self._cache or h in waits:
+                if h in waits:
+                    continue
+                v = self._cache.get(h)
+                if v is not None:
+                    self._cache.move_to_end(h)
+                    waits[h] = f = Future()
+                    f.set_result(v)
                     continue
                 f = self._inflight.get(h)
                 if f is None:
@@ -788,14 +795,7 @@ class Encoder:
     def finish(self, hashes: list[str], waits: dict[str, Future]) -> tuple[list[str], np.ndarray]:
         """(state hashes, float32 features) for what `start` queued."""
         got = {h: f.result() for h, f in waits.items()}
-        with self._lock:
-            out = []
-            for h in hashes:
-                v = self._cache.get(h)
-                if v is not None:
-                    self._cache.move_to_end(h)
-                out.append(v if v is not None else got[h])
-        return hashes, np.stack(out)
+        return hashes, np.stack([got[h] for h in hashes])
 
     def _run(self) -> None:
         while True:
